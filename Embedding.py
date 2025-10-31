@@ -1,17 +1,20 @@
 import requests
 import numpy as np
+import os
+from pathlib import Path
 from typing import List, Union
+from dotenv import load_dotenv
+
+# 加载环境变量
+env_path = Path(__file__).parent.parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"✅ 已加载环境变量文件: {env_path}")
+
 BATCH_SIZE = 10
 
 class Embedding:
     """千问Embedding类，用于生成文本嵌入向量"""
-    
-    # 千问API配置 - 北京地域
-    API_CONFIG = {
-        "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",  # 北京地域URL
-        "model": "text-embedding-v3",  # 使用text-embedding-v3模型
-        "key": "sk-ecf819b71fae427bb1ca8be81a257509"  # 测试密钥，直接写入代码
-    }
     
     def __init__(self, input_texts: Union[str, List[str]]):
         """
@@ -21,12 +24,22 @@ class Embedding:
             input_texts: 输入的文本或文本列表
         """
         self.input_texts = input_texts
+        
+        # 验证环境变量
+        self.api_key = os.getenv("QIANWEN_API_KEY")
+        if not self.api_key:
+            raise ValueError("请设置环境变量: QIANWEN_API_KEY")
+        
+        self.API_CONFIG = {
+            "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
+            "model": "text-embedding-v3"
+        }
+
     def _chunks(self, lst, n):
         """将列表按 n 个一组切片"""
         for i in range(0, len(lst), n):
             yield lst[i:i + n]
 
-    
     def embedding_call(self):
         """调用千问 Embedding API 生成文本嵌入向量（自动分批，单批最多 10 条）"""
 
@@ -34,7 +47,7 @@ class Embedding:
             raise ValueError("输入文本不能为空")
 
         headers = {
-            "Authorization": f"Bearer {self.API_CONFIG['key']}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
 
@@ -46,16 +59,11 @@ class Embedding:
 
         # 分批调用
         combined_data = []
-        combined_usage = None  # 用于合并 usage 信息
+        combined_usage = None
         base_url = self.API_CONFIG["url"]
         model = self.API_CONFIG["model"]
 
-        def chunks(lst, n):
-            """按 n 大小切分列表"""
-            for i in range(0, len(lst), n):
-                yield lst[i:i + n]
-
-        for batch_start, batch in enumerate(chunks(inputs, 10)):  # 千问上限是 10
+        for batch_start, batch in enumerate(self._chunks(inputs, 10)):
             payload = {
                 "model": model,
                 "input": batch
@@ -196,34 +204,19 @@ class Embedding:
         # 只返回相似度矩阵
         return similarity_matrix.tolist()
 
-# -------------------------------------------------------------------
 # 示例用法
 if __name__ == "__main__":
-    # -----------------------------------------------------------------
-# 修改示例用法的测试数据部分
-# -----------------------------------------------------------------
-# 更新：使用您提供的新术语和解释
-# -----------------------------------------------------------------
     relation_arrays = [
-    ["属于: 表明一个事物归于哪种类型或范围。", "归类为: 将某对象分配到事先确定的种类或群体中。", "是一种: 描述某具体事物在本质上与哪个大类概念相同。"],
-    ["包含: 描述一个整体内部拥有哪些组成部分或要素。", "下辖: 用于行政或组织结构，指代其管辖的附属机构或区域。", "设有: 描述一个组织机构内部配备了哪些具体的部门或职能单位。"],
-    ["相关: 指出两个或多个事物之间存在着某种联系或交集。", "涉及: 描述某个问题或事件牵扯到了哪些人和事。", "关联到: 说明一个信息或数据通过某种逻辑连接指向了另一个信息或数据。"],
-    ["位于: 标明一个物体在空间坐标上的具体位置。", "坐落于: 描述大型建筑、城市或地标处于某个地理环境之中。", "分布于: 说明某种事物或现象在特定区域内散布开来的情况。"],
-    ["导致: 表明前一个动作或事件直接产生了后面的结果。", "引发: 描述一个事件或行为触发了后续一系列的反应或后果。", "促使: 描述某种原因推动了某人或某事向特定方向发展或做出决定。"],
-    ["任职于: 表明某人在特定的机构或岗位上承担职务。", "效力于: 描述某人为了特定的组织或目标尽心尽力工作。", "在...工作: 记录某个人进行劳动和领取报酬的具体场所。"],
-    ["出生于: 记录一个生命体来到世界时的具体地点。", "籍贯: 标明某个人祖先的起源地或家庭历史所在的地区。", "源于: 追溯某个概念、传统或事物的最初发端和出处。"],
-    ["具有: 描述一个对象身上带有某种特征、能力或性质。", "特点是: 描述某个事物在同类中区别于其他事物的显著方面。", "拥有: 描述一个主体掌握着某种财富、资源或能力。"],
-    ["了解: 描述一个人对某个信息或事理达到了一定程度的认知。", "精通: 描述一个人对某项技能或知识掌握得极其深入和熟练。", "知晓: 表示一个人已经被告知某个消息或事实。"],
-    ["由...制成: 说明制造某个成品所使用的基本物质原料。", "材质为: 直接指明组成某个物品的物理材料种类。", "采用: 选择并开始使用某种方法、方案或系统。"]
-]
-    # -----------------------------------------------------------------
+        ["属于: 表明一个事物归于哪种类型或范围。", "归类为: 将某对象分配到事先确定的种类或群体中。", "是一种: 描述某具体事物在本质上与哪个大类概念相同。"],
+        ["包含: 描述一个整体内部拥有哪些组成部分或要素。", "下辖: 用于行政或组织结构，指代其管辖的附属机构或区域。", "设有: 描述一个组织机构内部配备了哪些具体的部门或职能单位。"],
+        ["相关: 指出两个或多个事物之间存在着某种联系或交集。", "涉及: 描述某个问题或事件牵扯到了哪些人和事。", "关联到: 说明一个信息或数据通过某种逻辑连接指向了另一个信息或数据。"],
+    ]
     
     # 将二维数组展开为一维列表，用于嵌入计算 (只取解释部分)
     all_texts = []
     for row in relation_arrays:
         for item in row:
             # 提取冒号后面的解释部分作为输入文本
-            # 格式: "术语: 解释" -> 提取 "解释"
             explanation_text = item.split(': ', 1)[1]
             all_texts.append(explanation_text)
     
@@ -234,83 +227,49 @@ if __name__ == "__main__":
         print(f"API调用失败: {result}")
         exit(1)
     
-    # 2. 提取嵌入向量 (后续计算组内相似度时需要)
+    # 2. 提取嵌入向量
     embeddings = embedding.extract_embeddings(result)
     if isinstance(embeddings, str) and embeddings.startswith("错误"):
         print(f"提取嵌入向量失败: {embeddings}")
         exit(1)
 
-    # -----------------------------------------------------------------
-    # 任务 1: 输出所有术语的解释之间的相似度 (All-Pairs Similarity)
-    # -----------------------------------------------------------------
-    print("## (任务1) 所有术语解释之间的相似度矩阵 (All-Pairs Similarity Matrix)")
+    # 任务 1: 输出所有术语的解释之间的相似度
+    print("## 所有术语解释之间的相似度矩阵")
     
-    # 使用 calculate_similarities 函数计算完整的矩阵 (现在是 30x30)
     all_pairs_matrix = embedding.calculate_similarities(result)
     
     if isinstance(all_pairs_matrix, dict) and "error" in all_pairs_matrix:
         print(f"计算全体相似度矩阵失败: {all_pairs_matrix['error']}")
     else:
         # 准备Markdown表格
-        
-        # 表头 (T1, T2, ..., T30)
         headers = ["(索引)"] + [f"T{i+1}" for i in range(len(all_texts))]
         print("| " + " | ".join(headers) + " |")
-        
-        # 分隔符
         print("|---" * (len(all_texts) + 1) + "|")
         
         # 打印矩阵的每一行
         for i, row in enumerate(all_pairs_matrix):
-            # 获取行标题 (T1: 术语名)
-            # 使用原始 relation_arrays 中对应的第一个元素来获取术语名
             term_name = relation_arrays[i//3][i%3].split(":")[0] 
             row_header = f"**T{i+1}** ({term_name})"
-            
-            # 格式化相似度数值
             row_data = [f"{val:.4f}" for val in row]
-            
-            # 打印行
             print(f"| {row_header} | " + " | ".join(row_data) + " |")
 
-    # -----------------------------------------------------------------
-    # 任务 2: 给出每一组之间的相似度 (Within-Group Similarity)
-    # -----------------------------------------------------------------
-    print("\n\n## (任务2) 每一组内部的相似度对比")
-    
-    # 输出Markdown表格
+    # 任务 2: 给出每一组之间的相似度
+    print("\n\n## 每一组内部的相似度对比")
     print("| 关系类型 | 解释1-解释2相似度 | 解释1-解释3相似度 | 解释2-解释3相似度 |")
     print("|---|---|---|---|")
     
     for i in range(len(relation_arrays)):
-        # 获取当前行的三个解释在嵌入向量中的索引
         idx1 = i * 3
         idx2 = i * 3 + 1
         idx3 = i * 3 + 2
         
-        # 提取三个解释的嵌入向量 (使用之前提取的 embeddings 列表)
         vec1 = embeddings[idx1]
         vec2 = embeddings[idx2]
         vec3 = embeddings[idx3]
         
-        # 计算两两之间的相似度
         sim12 = embedding.cosine_similarity(vec1, vec2)
         sim13 = embedding.cosine_similarity(vec1, vec3)
         sim23 = embedding.cosine_similarity(vec2, vec3)
         
-        # 获取关系类型（从第一个解释中提取术语名称）
         relation_type = relation_arrays[i][0].split(":")[0]
-        
-        print(f"| {relation_type} | {sim12:.4f} | {sim13:.4f} |")
-    
-    # -----------------------------------------------------------------
-    # 附录: 详细解释内容
-    # -----------------------------------------------------------------
-    print("\n\n## 附录：详细解释内容")
-    for i, row in enumerate(relation_arrays):
-        relation_type = row[0].split(":")[0]
-        # (T1, T2, T3), (T4, T5, T6), etc.
-        print(f"\n### {relation_type} (T{i*3+1} / T{i*3+2} / T{i*3+3})")
-        print(f"1. (T{i*3+1}) {row[0]}")
-        print(f"2. (T{i*3+2}) {row[1]}")
-        print(f"3. (T{i*3+3}) {row[2]}")
+        print(f"| {relation_type} | {sim12:.4f} | {sim13:.4f} | {sim23:.4f} |")

@@ -4,13 +4,11 @@
 # ✅ 修改2：添加多义词检测测试
 
 from LLM import LLM
-from Emdedding import Embedding
+from Embedding import Embedding
 import json
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass, field
-
-
 # =========================================================
 # 1) 数据容器类
 # =========================================================

@@ -1,25 +1,30 @@
 import requests
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载环境变量
+env_path = Path(__file__).parent.parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"✅ 已加载环境变量文件: {env_path}")
 
 class LLM:
-    # 支持多个API提供商
     API_CONFIGS = {
         "deepseek": {
             "url": "https://api.deepseek.com/chat/completions",
             "model": "deepseek-chat",
-            "key": "sk-d0f3da2caff640aab4da1cc25737849f"  # 测试密钥
+            "key_env": "DEEPSEEK_API_KEY"
         },
         "qianwen": {
             "url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
-            "model": "qwen3-max",
-            "key": "sk-ecf819b71fae427bb1ca8be81a257509"
+            "model": "qwen3-max", 
+            "key_env": "QIANWEN_API_KEY"
         },
-        # ✅ 新增：豆包（Doubao / ByteArk）
         "doubao": {
-            # 方舟(Ark) OpenAI 兼容接口：chat.completions
             "url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-            # 你示例里的模型 ID（可按需改成你的线上可用模型）
-            "model": "doubao-seed-1-6-250615",  # ✅ 修正这里
-            "key": "c9edb0ad-d9b8-4ed3-a5f6-69bfa1208dcc"
+            "model": "doubao-seed-1-6-250615",
+            "key_env": "DOUBAO_API_KEY"
         }
     }
     
@@ -31,26 +36,41 @@ class LLM:
         if api_provider not in self.API_CONFIGS:
             raise ValueError(f"不支持的API提供商: {api_provider}。支持的有: {list(self.API_CONFIGS.keys())}")
 
+        # 验证环境变量是否存在
+        config = self.API_CONFIGS[api_provider]
+        api_key = os.getenv(config['key_env'])
+        if not api_key:
+            raise ValueError(f"请设置环境变量: {config['key_env']}")
+
+    def _get_api_key(self):
+        """从环境变量获取API密钥"""
+        config = self.API_CONFIGS[self.api_provider]
+        api_key = os.getenv(config['key_env'])
+        if not api_key:
+            raise ValueError(f"环境变量 {config['key_env']} 未设置")
+        return api_key
+
     def llm_call(self):
         """调用API，兼容多个提供商，固定参数temperature=1, max_tokens=150"""
         if not self.prompt:
             raise ValueError("Prompt cannot be empty. Please set a prompt.")
         
         config = self.API_CONFIGS[self.api_provider]
+        api_key = self._get_api_key()
         
         if self.api_provider == "deepseek":
-            return self._call_deepseek(config)
+            return self._call_deepseek(config, api_key)
         elif self.api_provider == "qianwen":
-            return self._call_qianwen(config)
+            return self._call_qianwen(config, api_key)
         elif self.api_provider == "doubao":
-            return self._call_doubao(config)
+            return self._call_doubao(config, api_key)
         else:
             raise ValueError(f"未实现的API提供商: {self.api_provider}")
 
-    def _call_deepseek(self, config):
+    def _call_deepseek(self, config, api_key):
         """调用Deepseek API，固定参数temperature=1, max_tokens=150"""
         headers = {
-            "Authorization": f"Bearer {config['key']}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -66,10 +86,10 @@ class LLM:
             print(f"Deepseek API 错误: {response.text}")
             return {"error": f"API 请求失败，状态码：{response.status_code}", "details": response.text}
 
-    def _call_qianwen(self, config):
+    def _call_qianwen(self, config, api_key):
         """调用千问API，固定参数temperature=1, max_tokens=150"""
         headers = {
-            "Authorization": f"Bearer {config['key']}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -91,13 +111,12 @@ class LLM:
             print(f"千问 API 错误: {response.text}")
             return {"error": f"API 请求失败，状态码：{response.status_code}", "details": response.text}
 
-    def _call_doubao(self, config):
+    def _call_doubao(self, config, api_key):
         """调用豆包(方舟 OpenAI 兼容) API，固定参数temperature=1, max_tokens=150"""
         headers = {
-            "Authorization": f"Bearer {config['key']}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        # 方舟的 chat.completions 与 OpenAI 兼容：messages/choices[0].message.content
         payload = {
             "model": config["model"],
             "messages": [{"role": "user", "content": self.prompt}],
@@ -121,7 +140,6 @@ class LLM:
             elif self.api_provider == "qianwen":
                 return api_response['output']['choices'][0]['message']['content']
             elif self.api_provider == "doubao":
-                # 与 OpenAI 对齐
                 return api_response['choices'][0]['message']['content']
         except (KeyError, IndexError, TypeError) as e:
             return f"解析响应失败: {str(e)}"
@@ -141,6 +159,7 @@ if __name__ == "__main__":
     print(f"原始响应: {result_qianwen}")
     content_qianwen = llm_qianwen.extract_response(result_qianwen)
     print(f"提取内容: {content_qianwen}")
+    
     print("\n=== 使用豆包 API ===")
     llm_doubao = LLM(prompt="你好，请介绍一下你自己", api_provider="doubao")
     result_doubao = llm_doubao.llm_call()
