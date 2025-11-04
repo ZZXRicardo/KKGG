@@ -756,7 +756,7 @@ class TermDisambiguator:
             terms=entity_terms,
             json_path=entity_json_path,
             synonym_threshold_low=0.73,
-            synonym_threshold_high=0.85,
+            synonym_threshold_high=0.89,
             polysemy_threshold=0.73,
             shared_context=entity_shared_context,
             force_polysemy_check=True  # 🔧 启用一词多义检测

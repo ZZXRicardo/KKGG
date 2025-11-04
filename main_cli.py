@@ -12,9 +12,9 @@ import os
 import json
 from pathlib import Path
 from typing import List, Dict, Set, Tuple
-from project.cli import CLI
-from project.EntityExtractor import EntityExtractor
-from project.relation_extraction.extractor import RelationExtractor
+from cli import CLI
+#from EntityExtractor import EntityExtractor
+#from relation_extraction.extractor import RelationExtractor
 from disambiguator_clusterer import TermDisambiguator
 
 
@@ -135,8 +135,6 @@ class MainCLI(CLI):
         
         # 定义输入输出路径
         input_json_path = r"E:\KKGG\output\KG\输出.json"
-        entity_json_path = os.path.join(args.output_dir, "Entity.json")
-        relation_json_path = os.path.join(args.output_dir, "Relation.json")
         
         # 读取JSON数据
         try:
@@ -208,7 +206,7 @@ class MainCLI(CLI):
         logging.info(f"关系样例: {relation_list[:5]}")
         
         if not entity_a_list and not relation_list:
-            logging.warning("未找到任何label='a'的实体或关系词，跳过消歧")
+            logging.warning("未找到任何实体或关系词，跳过消歧")
             return
         
         # 构建共享上下文（限制长度避免过长）
@@ -219,16 +217,12 @@ class MainCLI(CLI):
         disambiguator = TermDisambiguator(api_provider="qianwen")
         
         try:
+            # ✅ 修复：只传入方法定义中接受的参数
             updated_entities, updated_relations = disambiguator.Disambiguate(
                 entity_terms=entity_a_list,
                 relation_terms=relation_list,
                 entity_shared_context=entity_shared_context,
-                relation_shared_context=relation_shared_context,
-                entity_json_path=entity_json_path,
-                relation_json_path=relation_json_path,
-                synonym_threshold_low=0.70,
-                synonym_threshold_high=0.85,
-                polysemy_threshold=0.73
+                relation_shared_context=relation_shared_context
             )
             
             logging.info(f"消歧完成 - 更新后实体数: {len(updated_entities)}, 关系数: {len(updated_relations)}")
@@ -302,8 +296,7 @@ class MainCLI(CLI):
         从输出.json中：
         1. 遍历relations数组，识别所有词的label属性
         2. 收集所有label=='b'的词（不论在head还是tail位置）
-        3. 从relations数组收集所有三元组
-        4. 调用clusterer函数进行聚类（不替换原文件）
+        3. 调用clusterer函数进行聚类（不替换原文件）
         
         Args:
             args: 命令行参数
@@ -312,8 +305,6 @@ class MainCLI(CLI):
         
         # 定义输入路径
         input_json_path = r"E:\KKGG\output\KG\输出.json"
-        definitions_json_path = os.path.join(args.output_dir, "definitions.json")
-        cluster_json_path = os.path.join(args.output_dir, "def_cluster.json")
         
         # 读取JSON数据
         try:
@@ -324,9 +315,8 @@ class MainCLI(CLI):
             logging.error(f"读取输入文件失败: {e}")
             return
         
-        # 收集所有label=='b'的实体（不论位置）和所有三元组
+        # 收集所有label=='b'的实体（不论位置）
         entity_b_terms = set()   # label=='b'的实体（head或tail）
-        triples_list = []         # 所有三元组
         context_parts = []        # 用于构建共享上下文
         
         for item in data:
@@ -366,15 +356,11 @@ class MainCLI(CLI):
                                 entity_b_terms.add(tail)
                                 context_parts.append(f"{head} {relation} {tail}")
                                 logging.debug(f"找到label='b'的实体(tail): {tail}")
-                            
-                            # 3. 收集所有三元组
-                            triples_list.append((head, relation, tail))
         
         # 转换为列表
         entity_b_list = sorted(list(entity_b_terms))
         
         logging.info(f"收集到 {len(entity_b_list)} 个label='b'的实体（不论位置）")
-        logging.info(f"收集到 {len(triples_list)} 个三元组")
         logging.info(f"实体样例: {entity_b_list[:10]}")
         
         if not entity_b_list:
@@ -388,15 +374,10 @@ class MainCLI(CLI):
         clusterer = TermDisambiguator(api_provider="qianwen")
         
         try:
+            # ✅ 修复：只传入方法定义中接受的参数
             cluster_result = clusterer.clusterer(
                 terms=entity_b_list,
-                definitions_json_path=definitions_json_path,
-                cluster_json_path=cluster_json_path,
-                synonym_threshold_low=0.73,
-                synonym_threshold_high=0.85,
-                polysemy_threshold=0.73,
-                shared_context=shared_context,
-                triples=triples_list
+                shared_context=shared_context
             )
             
             logging.info(f"聚类完成 - 生成的聚类结果已保存")
