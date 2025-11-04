@@ -16,6 +16,11 @@ class LLM:
             "model": "deepseek-chat",
             "key_env": "DEEPSEEK_API_KEY"
         },
+        "deepseek-reasoning": {
+            "url": "https://api.deepseek.com/chat/completions",
+            "model": "deepseek-reasoner",
+            "key_env": "DEEPSEEK_API_KEY"
+        },
         "qianwen": {
             "url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
             "model": "qwen3-max", 
@@ -60,6 +65,8 @@ class LLM:
         
         if self.api_provider == "deepseek":
             return self._call_deepseek(config, api_key)
+        elif self.api_provider == "deepseek-reasoning":
+            return self._call_deepseek_reasoning(config, api_key)
         elif self.api_provider == "qianwen":
             return self._call_qianwen(config, api_key)
         elif self.api_provider == "doubao":
@@ -77,13 +84,33 @@ class LLM:
             "model": config["model"],
             "messages": [{"role": "user", "content": self.prompt}],
             "temperature": 1,
-            "max_tokens": 150
+            "max_tokens": 1000
         }
         response = requests.post(config["url"], headers=headers, json=payload)
         if response.status_code == 200:
             return response.json()
         else:
             print(f"Deepseek API 错误: {response.text}")
+            return {"error": f"API 请求失败，状态码：{response.status_code}", "details": response.text}
+
+    def _call_deepseek_reasoning(self, config, api_key):
+        """调用Deepseek Reasoning API，固定参数temperature=1, max_tokens=150"""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": config["model"],
+            "messages": [{"role": "user", "content": self.prompt}],
+            "temperature": 1,
+            "max_tokens": 3000,
+            "reasoning": True  # 启用思考模式
+        }
+        response = requests.post(config["url"], headers=headers, json=payload)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Deepseek Reasoning API 错误: {response.text}")
             return {"error": f"API 请求失败，状态码：{response.status_code}", "details": response.text}
 
     def _call_qianwen(self, config, api_key):
@@ -101,7 +128,7 @@ class LLM:
             },
             "parameters": {
                 "temperature": 1,
-                "max_tokens": 150
+                "max_tokens": 1000
             }
         }
         response = requests.post(config["url"], headers=headers, json=payload)
@@ -121,7 +148,7 @@ class LLM:
             "model": config["model"],
             "messages": [{"role": "user", "content": self.prompt}],
             "temperature": 1,
-            "max_tokens": 150
+            "max_tokens": 1000
         }
         response = requests.post(config["url"], headers=headers, json=payload)
         if response.status_code == 200:
@@ -137,6 +164,17 @@ class LLM:
         try:
             if self.api_provider == "deepseek":
                 return api_response['choices'][0]['message']['content']
+            elif self.api_provider == "deepseek-reasoning":
+                # 对于思考模式，我们只返回最终的回答内容，不返回思考过程
+                message = api_response['choices'][0]['message']
+                # 如果有常规的content字段，使用它（这是最终回答）
+                if 'content' in message and message['content']:
+                    return message['content']
+                # 如果没有常规content，但有思考内容，说明思考过程被截断了，没有生成最终回答
+                elif 'reasoning_content' in message:
+                    return "思考过程已完成，但未生成最终回答（可能因token限制被截断）"
+                else:
+                    return "未获取到有效回复"
             elif self.api_provider == "qianwen":
                 return api_response['output']['choices'][0]['message']['content']
             elif self.api_provider == "doubao":
@@ -152,6 +190,13 @@ if __name__ == "__main__":
     print(f"原始响应: {result_deepseek}")
     content_deepseek = llm_deepseek.extract_response(result_deepseek)
     print(f"提取内容: {content_deepseek}")
+
+    print("\n=== 使用 Deepseek Reasoning API ===")
+    llm_deepseek_reasoning = LLM(prompt="请解释一下量子计算的基本原理", api_provider="deepseek-reasoning")
+    result_deepseek_reasoning = llm_deepseek_reasoning.llm_call()
+    print(f"原始响应: {result_deepseek_reasoning}")
+    content_deepseek_reasoning = llm_deepseek_reasoning.extract_response(result_deepseek_reasoning)
+    print(f"提取内容: {content_deepseek_reasoning}")
 
     print("\n=== 使用千问 API ===")
     llm_qianwen = LLM(prompt="你好，请介绍一下你自己", api_provider="qianwen")
