@@ -23,7 +23,7 @@ class LLM:
         },
         "qianwen": {
             "url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
-            "model": "qwen3-max", 
+            "model": "qwen-plus-latest", 
             "key_env": "QIANWEN_API_KEY"
         },
         "doubao": {
