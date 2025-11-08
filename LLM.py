@@ -84,7 +84,7 @@ class LLM:
             "model": config["model"],
             "messages": [{"role": "user", "content": self.prompt}],
             "temperature": 1,
-            "max_tokens": 1000
+            "max_tokens": 8192
         }
         response = requests.post(config["url"], headers=headers, json=payload)
         if response.status_code == 200:
@@ -103,7 +103,7 @@ class LLM:
             "model": config["model"],
             "messages": [{"role": "user", "content": self.prompt}],
             "temperature": 1,
-            "max_tokens": 3000,
+            "max_tokens": 20000,
             "reasoning": True  # 启用思考模式
         }
         response = requests.post(config["url"], headers=headers, json=payload)
@@ -128,7 +128,7 @@ class LLM:
             },
             "parameters": {
                 "temperature": 1,
-                "max_tokens": 1000
+                "max_tokens": 8192
             }
         }
         response = requests.post(config["url"], headers=headers, json=payload)
@@ -148,7 +148,7 @@ class LLM:
             "model": config["model"],
             "messages": [{"role": "user", "content": self.prompt}],
             "temperature": 1,
-            "max_tokens": 1000
+            "max_tokens": 8192
         }
         response = requests.post(config["url"], headers=headers, json=payload)
         if response.status_code == 200:
