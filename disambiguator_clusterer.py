@@ -161,6 +161,28 @@ class TermDisambiguator:
             "如果提供了共享上下文，请从上下文中提取该术语的语义进行消歧。\n"
             "【示例-正确】「一种能自动处理信息的电子设备。」\n"
             "【示例-错误】「电脑是一种能自动处理信息的电子设备。」（包含术语）"
+            "同时，在解释非关系词时请确保解释体现术语的本质特征，避免使用上位词和归类句式。\n\n"
+    
+              "【核心要求】\n"
+            "1. 🔍 挖掘本质：聚焦该术语最独特的、区别于其他同类事物的特征\n"
+            "2. 🚫 避免上位词：不要使用『一种XX』、『属于XX』等归类句式\n"
+            "3. 🎯 特征导向：直接描述其核心属性、功能、形态或作用机制\n"
+            "4. 📝 句式多样：避免所有解释使用相同句式结构\n"
+            "5. ❌ 禁止出现：术语本身、『是……』句式、同义词引用\n\n"
+    
+           "【错误示例】\n"
+            "苹果：一种水果，富含维生素C ❌（使用上位词）\n"
+            "橙子：一种富含维生素C的水果 ❌（句式重复）\n"
+            "升：一种容量的计量单位 ❌（过于笼统）\n"
+            "毫升：空间计量单位 ❌（特征不准确）\n\n"
+    
+            "【正确示例】\n"
+            "苹果：果皮多为红/绿色，果肉脆甜多汁，核心有籽 ✔\n"
+            "橙子：柑橘类果实，果皮橙黄易剥，果瓣多汁酸甜 ✔\n"
+            "升：等于立方分米，常用于衡量液体体积的基本单位 ✔\n"
+            "毫升：千分之一升，适用于小容量液体的精确计量 ✔\n"
+            "机器学习：通过数据训练让计算机自动改进决策能力 ✔\n"
+            "区块链：由按时间顺序连接的不可篡改数据块构成 ✔\n\n"
         )
         
         if shared_context:
@@ -836,267 +858,265 @@ class TermDisambiguator:
 
 
 # =========================================================
-# 测试主函数 - 🔧 已添加一词多义跨批次测试
+# 测试主函数 - 三组词汇分析（无上下文）
 # =========================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("术语消歧与聚类系统 - 三大功能测试")
+    print("术语消歧与聚类系统 - 三组词汇分析（无上下文）")
     print("=" * 60)
     
+    disambiguator = TermDisambiguator(api_provider="qianwen")
+    
     # =========================================================
-    # 测试1: Clusterer 函数测试
+    # 第一组：完全相同的词 (True Synonyms)
     # =========================================================
     print("\n" + "=" * 60)
-    print("测试1: Clusterer 函数 - 术语聚类与三元组生成")
+    print("第一组：完全相同的词 (True Synonyms)")
     print("=" * 60)
     
-    clusterer_disambiguator = TermDisambiguator(api_provider="qianwen")
+    group1_terms = [
+        "土豆", "马铃薯", "吉他", "六弦琴", "嫉妒", "妒忌", 
+        "出租车", "的士", "水泥", "洋灰", "演讲", "讲演", 
+        "玉米", "苞米", "自行车", "脚踏车", "慷慨", "大方", "痊愈", "康复"
+    ]
     
-    # 测试术语和上下文
-    test1_terms = ["机器学习", "ML", "深度学习", "神经网络", "人工智能", "AI"]
-    test1_shared_context = (
-        "机器学习是人工智能的一个分支，让计算机通过数据学习。"
-        "ML是Machine Learning的缩写，指机器学习。"
-        "深度学习使用多层神经网络进行学习。"
-        "神经网络模拟人脑神经元结构。"
-        "人工智能是计算机科学的一个领域。"
-        "AI是Artificial Intelligence的简称。"
-    )
+    print(f"术语数量: {len(group1_terms)}")
+    print(f"术语列表: {group1_terms}")
     
-    print(f"输入术语: {test1_terms}")
-    print(f"共享上下文长度: {len(test1_shared_context)} 字符")
+    # 为每个术语生成解释和嵌入向量（无上下文）
+    group1_results = []
+    for term in group1_terms:
+        explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
+        group1_results.append({
+            "term": term,
+            "explanation": explanation,
+            "embedding": embedding
+        })
+        print(f"\n术语: {term}")
+        print(f"解释: {explanation}")
+        print(f"嵌入向量长度: {len(embedding)}")
     
-    # 调用clusterer函数
-    result1 = clusterer_disambiguator.clusterer(
-        terms=test1_terms,
-        shared_context=test1_shared_context
-    )
+    # 计算相似度矩阵
+    print("\n" + "-" * 80)
+    print("相似度矩阵:")
+    print("-" * 80)
     
-    # 查看结果
-    definitions_path = r"E:\KKGG\output\terms\definitions.json"
-    cluster_path = r"E:\KKGG\output\KG\def_cluster.json"
+    # 表头
+    print(" " * 12, end="")
+    for result in group1_results:
+        print(f"{result['term']:6}", end="")
+    print()
     
-    print("\n[术语定义JSON - 前5个]")
-    try:
-        with open(definitions_path, "r", encoding="utf-8") as f:
-            definitions_data = json.load(f)
-        for item in definitions_data[:5]:
-            print(f"  术语: {item['term']}")
-            print(f"  解释: {item.get('explanation', '')[:50]}...")
-            print(f"  同义词: {item['synonyms']}")
-            print()
-    except Exception as e:
-        print(f"  读取失败: {e}")
-    
-    print("\n[三元组JSON - 前3个术语]")
-    try:
-        with open(cluster_path, "r", encoding="utf-8") as f:
-            cluster_data = json.load(f)
-        for term, triples in list(cluster_data.items())[:3]:
-            print(f"  术语: {term}")
-            for triple in triples:
-                print(f"    ({triple['head']}, {triple['relation']}, {triple['tail']})")
-            print()
-    except Exception as e:
-        print(f"  读取失败: {e}")
-    
-    print("✅ 测试1完成 - Clusterer函数")
+    # 矩阵内容
+    for i, result1 in enumerate(group1_results):
+        print(f"{result1['term']:12}", end="")
+        for j, result2 in enumerate(group1_results):
+            if i == j:
+                print(" 1.000 ", end="")
+            else:
+                sim = disambiguator._cos(result1['embedding'], result2['embedding'])
+                print(f" {sim:.3f} ", end="")
+        print()
     
     # =========================================================
-    # 🔧 新增测试1.5: 跨批次一词多义检测
+    # 第二组：相关但有明确区别的词
     # =========================================================
     print("\n" + "=" * 60)
-    print("测试1.5: 跨批次一词多义检测 - ML作为容量单位")
+    print("第二组：相关但有明确区别的词")
     print("=" * 60)
     
-    # 第二批：ML作为容量单位
-    test1_5_terms = ["毫升", "ML", "升", "立方厘米"]
-    test1_5_shared_context = (
-        "毫升是容量单位，常用于液体测量。"
-        "ML是milliliter的英文缩写，表示毫升。"
-        "升是公制容量单位，1升等于1000毫升。"
-        "立方厘米是体积单位，1立方厘米等于1毫升。"
-    )
+    group2_terms = [
+        "音乐", "乐器", "医院", "医生", "烹饪", "厨师", 
+        "电影", "导演", "科学", "技术", "经济", "贸易", 
+        "历史", "考古", "天气", "气候", "时间", "效率", "目标", "策略"
+    ]
     
-    print(f"输入术语: {test1_5_terms}")
-    print(f"共享上下文长度: {len(test1_5_shared_context)} 字符")
+    print(f"术语数量: {len(group2_terms)}")
+    print(f"术语列表: {group2_terms}")
     
-    # 调用clusterer函数（使用相同的实例和JSON文件）
-    result1_5 = clusterer_disambiguator.clusterer(
-        terms=test1_5_terms,
-        shared_context=test1_5_shared_context
-    )
+    # 为每个术语生成解释和嵌入向量（无上下文）
+    group2_results = []
+    for term in group2_terms:
+        explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
+        group2_results.append({
+            "term": term,
+            "explanation": explanation,
+            "embedding": embedding
+        })
+        print(f"\n术语: {term}")
+        print(f"解释: {explanation}")
+        print(f"嵌入向量长度: {len(embedding)}")
     
-    print("\n[更新后的术语定义JSON - 所有]")
-    try:
-        with open(definitions_path, "r", encoding="utf-8") as f:
-            definitions_data = json.load(f)
-        for item in definitions_data:
-            print(f"  术语: {item['term']}")
-            print(f"  解释: {item.get('explanation', '')[:60]}...")
-            print(f"  同义词: {item['synonyms']}")
-            print()
-    except Exception as e:
-        print(f"  读取失败: {e}")
+    # 计算相似度矩阵
+    print("\n" + "-" * 100)
+    print("相似度矩阵:")
+    print("-" * 100)
     
-    print("✅ 测试1.5完成 - 跨批次一词多义检测")
+    # 表头
+    print(" " * 12, end="")
+    for result in group2_results:
+        print(f"{result['term']:6}", end="")
+    print()
+    
+    # 矩阵内容
+    for i, result1 in enumerate(group2_results):
+        print(f"{result1['term']:12}", end="")
+        for j, result2 in enumerate(group2_results):
+            if i == j:
+                print(" 1.000 ", end="")
+            else:
+                sim = disambiguator._cos(result1['embedding'], result2['embedding'])
+                print(f" {sim:.3f} ", end="")
+        print()
     
     # =========================================================
-    # 测试2: Disambiguate 函数测试
+    # 第三组：有相同上位词的并列词
     # =========================================================
     print("\n" + "=" * 60)
-    print("测试2: Disambiguate 函数 - 实体与关系术语消歧")
+    print("第三组：有相同上位词的并列词")
     print("=" * 60)
     
-    disambiguate_instance = TermDisambiguator(api_provider="qianwen")
+    group3_terms = [
+        "悲伤", "喜悦", "愤怒", "加法", "减法", "乘法", 
+        "篮球", "足球", "网球", "红色", "蓝色", "绿色", 
+        "小说", "诗歌", "散文", "医生", "律师", "会计", 
+        "春节", "中秋", "端午", "陆军", "海军", "空军", 
+        "煎", "炒", "蒸", "炸", "钢笔", "铅笔", "马克笔"
+    ]
     
-    # 测试数据
-    test2_entity_terms = ["苹果公司", "Apple", "微软", "Microsoft", "谷歌", "Google"]
-    test2_relation_terms = ["创建", "建立", "成立", "拥有", "持有", "开发", "研发"]
+    print(f"术语数量: {len(group3_terms)}")
+    print(f"术语列表: {group3_terms}")
     
-    test2_entity_shared_context = (
-        "苹果公司是一家美国科技公司，生产iPhone和Mac。"
-        "Apple是全球知名的科技企业，总部在加州。"
-        "微软是软件公司，开发Windows系统。"
-        "Microsoft开发了Office办公软件。"
-        "谷歌是搜索引擎公司。"
-        "Google提供互联网服务。"
-    )
+    # 为每个术语生成解释和嵌入向量（无上下文）
+    group3_results = []
+    for term in group3_terms:
+        explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
+        group3_results.append({
+            "term": term,
+            "explanation": explanation,
+            "embedding": embedding
+        })
+        print(f"\n术语: {term}")
+        print(f"解释: {explanation}")
+        print(f"嵌入向量长度: {len(embedding)}")
     
-    test2_relation_shared_context = (
-        "史蒂夫·乔布斯创建了苹果公司。"
-        "史蒂夫·乔布斯建立了苹果公司。"
-        "比尔·盖茨成立了微软。"
-        "比尔·盖茨拥有微软股份。"
-        "投资者持有公司股票。"
-        "苹果开发了iOS系统。"
-        "微软研发了Azure云平台。"
-    )
+    # 计算相似度矩阵
+    print("\n" + "-" * 120)
+    print("相似度矩阵:")
+    print("-" * 120)
     
-    print(f"输入实体术语: {test2_entity_terms}")
-    print(f"输入关系术语: {test2_relation_terms}")
+    # 表头
+    print(" " * 10, end="")
+    for result in group3_results:
+        print(f"{result['term']:6}", end="")
+    print()
     
-    # 调用 Disambiguate 函数
-    updated_entities, updated_relations = disambiguate_instance.Disambiguate(
-        entity_terms=test2_entity_terms,
-        relation_terms=test2_relation_terms,
-        entity_shared_context=test2_entity_shared_context,
-        relation_shared_context=test2_relation_shared_context
-    )
-    
-    # 显示结果
-    print("\n[更新后的数组对比]")
-    print(f"原始实体 ({len(test2_entity_terms)}): {test2_entity_terms}")
-    print(f"更新实体 ({len(updated_entities)}): {updated_entities}")
-    print(f"\n原始关系 ({len(test2_relation_terms)}): {test2_relation_terms}")
-    print(f"更新关系 ({len(updated_relations)}): {updated_relations}")
-    
-    # 查看JSON文件
-    entity_json_path = r"E:\KKGG\output\terms\Entity.json"
-    relation_json_path = r"E:\KKGG\output\terms\Relation.json"
-    
-    print("\n[实体JSON内容 - 所有]")
-    try:
-        with open(entity_json_path, "r", encoding="utf-8") as f:
-            entity_data = json.load(f)
-        for item in entity_data:
-            print(f"  术语: {item['term']}, 同义词: {item['synonyms']}")
-    except Exception as e:
-        print(f"  读取失败: {e}")
-    
-    print("\n[关系JSON内容 - 所有]")
-    try:
-        with open(relation_json_path, "r", encoding="utf-8") as f:
-            relation_data = json.load(f)
-        for item in relation_data:
-            print(f"  术语: {item['term']}, 同义词: {item['synonyms']}")
-    except Exception as e:
-        print(f"  读取失败: {e}")
-    
-    print("✅ 测试2完成 - Disambiguate函数")
+    # 矩阵内容
+    for i, result1 in enumerate(group3_results):
+        print(f"{result1['term']:10}", end="")
+        for j, result2 in enumerate(group3_results):
+            if i == j:
+                print(" 1.000 ", end="")
+            else:
+                sim = disambiguator._cos(result1['embedding'], result2['embedding'])
+                print(f" {sim:.3f} ", end="")
+        print()
     
     # =========================================================
-    # 测试3: 一词多义检测测试
+    # 聚类分析测试 - 对所有术语进行聚类
     # =========================================================
     print("\n" + "=" * 60)
-    print("测试3: 一词多义检测 - 分批次处理同一术语")
+    print("聚类分析测试 - 使用Clusterer函数对所有术语进行聚类")
     print("=" * 60)
     
-    polysemy_disambiguator = TermDisambiguator(api_provider="qianwen")
-    json_polysemy_path = r"E:\KKGG\output\terms\polysemy_test.json"
+    # 合并所有术语进行聚类测试
+    all_terms = group1_terms + group2_terms + group3_terms
     
-    # 第一批：苹果（水果）
-    print("\n--- 第一批次：苹果作为水果 ---")
-    batch1_terms = ["苹果", "香蕉", "橙子"]
-    batch1_context = (
-        "苹果是一种常见的水果，富含维生素C和膳食纤维，口感清甜爽脆。"
-        "香蕉是热带水果，含有丰富的钾元素。"
-        "橙子是柑橘类水果，富含维生素C。"
-    )
+    print(f"总术语数: {len(all_terms)}")
     
-    print(f"输入术语: {batch1_terms}")
-    result3_batch1 = polysemy_disambiguator.process_terms_pipeline(
-        terms=batch1_terms,
-        json_path=json_polysemy_path,
-        synonym_threshold_low=0.70,
-        synonym_threshold_high=0.85,
-        polysemy_threshold=0.73,
-        shared_context=batch1_context,
-        force_polysemy_check=True  # 🔧 启用一词多义检测
-    )
+    # 使用clusterer函数进行聚类分析（无上下文）
+    cluster_result = disambiguator.clusterer(terms=all_terms)
     
-    print(f"\n第一批结果 - 新增术语: {result3_batch1['new_terms']}")
-    print(f"第一批结果 - 同义词对: {result3_batch1['synonym_pairs']}")
+    # 显示聚类结果
+    print("\n聚类结果统计:")
+    print(f"新增术语: {len(cluster_result['new_terms'])}")
+    print(f"同义词对: {len(cluster_result['synonym_pairs'])}")
+    print(f"多义拆分: {len(cluster_result['disambiguations'])}")
     
-    # 第二批：苹果（公司）
-    print("\n--- 第二批次：苹果作为公司 ---")
-    batch2_terms = ["苹果", "微软", "谷歌"]
-    batch2_context = (
-        "苹果公司是全球知名的科技企业，总部位于加州库比蒂诺，主要产品包括iPhone、iPad和Mac。"
-        "微软是世界最大的软件公司之一，开发了Windows操作系统。"
-        "谷歌是互联网搜索引擎公司，提供各种在线服务。"
-    )
+    # 显示具体的同义词对
+    if cluster_result['synonym_pairs']:
+        print("\n识别出的同义词对:")
+        for pair in cluster_result['synonym_pairs']:
+            print(f"  {pair[0]} → {pair[1]}")
     
-    print(f"输入术语: {batch2_terms}")
-    result3_batch2 = polysemy_disambiguator.process_terms_pipeline(
-        terms=batch2_terms,
-        json_path=json_polysemy_path,
-        synonym_threshold_low=0.70,
-        synonym_threshold_high=0.85,
-        polysemy_threshold=0.73,
-        shared_context=batch2_context,
-        force_polysemy_check=True  # 🔧 启用一词多义检测
-    )
-    
-    print(f"\n第二批结果 - 新增术语: {result3_batch2['new_terms']}")
-    print(f"第二批结果 - 同义词对: {result3_batch2['synonym_pairs']}")
-    print(f"第二批结果 - 多义拆分: {result3_batch2['disambiguations']}")
-    
-    # 显示最终的JSON内容
-    print("\n[最终JSON内容 - 所有术语]")
-    try:
-        with open(json_polysemy_path, "r", encoding="utf-8") as f:
-            polysemy_data = json.load(f)
-        for item in polysemy_data:
-            print(f"  术语: {item['term']}")
-            print(f"  解释: {item.get('explanation', '')[:60]}...")
-            print(f"  同义词: {item['synonyms']}")
-            print()
-    except Exception as e:
-        print(f"  读取失败: {e}")
-    
-    print("✅ 测试3完成 - 一词多义检测")
+    # 显示多义拆分结果
+    if cluster_result['disambiguations']:
+        print("\n多义拆分结果:")
+        for disambig in cluster_result['disambiguations']:
+            print(f"  {disambig[0]} → {disambig[1]} 和 {disambig[2]}")
     
     # =========================================================
-    # 总结
+    # 分析总结
     # =========================================================
     print("\n" + "=" * 60)
-    print("所有测试完成！")
+    print("分析总结")
     print("=" * 60)
-    print("测试文件保存位置:")
-    print(f"  1. Clusterer - 术语定义: {definitions_path}")
-    print(f"  2. Clusterer - 三元组: {cluster_path}")
-    print(f"  3. Disambiguate - 实体: {entity_json_path}")
-    print(f"  4. Disambiguate - 关系: {relation_json_path}")
-    print(f"  5. 一词多义: {json_polysemy_path}")
+    
+    print("第一组（完全相同的词）预期:")
+    print("  - 同义词对（如土豆/马铃薯、吉他/六弦琴）应有高相似度（>0.8）")
+    print("  - 不同概念的词（如土豆/吉他）应有较低相似度")
+    
+    print("\n第二组（相关但有明确区别的词）预期:")
+    print("  - 相关概念对（如音乐/乐器、医院/医生）应有中等相似度（0.5-0.8）")
+    print("  - 不相关概念应有较低相似度")
+    
+    print("\n第三组（并列词）预期:")
+    print("  - 同类别词（如悲伤/喜悦、篮球/足球）应有中等相似度")
+    print("  - 不同类别词（如悲伤/篮球）应有较低相似度")
+    
+    print("\n聚类分析预期:")
+    print("  - 第一组的同义词应该被正确聚类")
+    print("  - 第二组和第三组的相关词可能被识别为同义词，需要LLM确认")
+    print("  - 注意：第三组中的'医生'与第二组重复，可能触发一词多义检测")
+    
+    # =========================================================
+    # 同义词对验证
+    # =========================================================
+    print("\n" + "=" * 60)
+    print("同义词对验证")
+    print("=" * 60)
+    
+    # 验证第一组中的同义词对是否被正确识别
+    expected_synonym_pairs = [
+        ("土豆", "马铃薯"), ("吉他", "六弦琴"), ("嫉妒", "妒忌"),
+        ("出租车", "的士"), ("水泥", "洋灰"), ("演讲", "讲演"),
+        ("玉米", "苞米"), ("自行车", "脚踏车"), ("慷慨", "大方"), ("痊愈", "康复")
+    ]
+    
+    found_pairs = []
+    for expected_pair in expected_synonym_pairs:
+        term1, term2 = expected_pair
+        # 检查是否在聚类结果中被识别为同义词
+        found = False
+        for actual_pair in cluster_result['synonym_pairs']:
+            if (actual_pair[0] == term1 and actual_pair[1] == term2) or \
+               (actual_pair[0] == term2 and actual_pair[1] == term1):
+                found = True
+                break
+        found_pairs.append((expected_pair, found))
+    
+    print("同义词识别准确率:")
+    correct_count = sum(1 for _, found in found_pairs if found)
+    accuracy = correct_count / len(found_pairs) * 100
+    print(f"  预期同义词对: {len(found_pairs)}")
+    print(f"  正确识别: {correct_count}")
+    print(f"  准确率: {accuracy:.1f}%")
+    
+    # 显示具体结果
+    for pair, found in found_pairs:
+        status = "✅" if found else "❌"
+        print(f"  {status} {pair[0]} - {pair[1]}")
+    
+    print("\n" + "=" * 60)
+    print("测试完成！")
     print("=" * 60)
