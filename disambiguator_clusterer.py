@@ -693,9 +693,9 @@ class TermDisambiguator:
         # 固定参数
         json_path = r"E:\KKGG\output\terms\definitions.json"
         cluster_json_path = r"E:\KKGG\output\KG\def_cluster.json"
-        synonym_threshold_low = 0.73
-        synonym_threshold_high = 0.85
-        polysemy_threshold = 0.73
+        synonym_threshold_low = 0.69
+        synonym_threshold_high = 0.84
+        polysemy_threshold = 0.75
         
         print("\n" + "=" * 60)
         print("Clusterer 函数 - 术语聚类与三元组生成")
@@ -777,9 +777,9 @@ class TermDisambiguator:
         entity_result = self.process_terms_pipeline(
             terms=entity_terms,
             json_path=entity_json_path,
-            synonym_threshold_low=0.73,
-            synonym_threshold_high=0.89,
-            polysemy_threshold=0.73,
+            synonym_threshold_low=0.69,
+            synonym_threshold_high=0.84,
+            polysemy_threshold=0.75,
             shared_context=entity_shared_context,
             force_polysemy_check=True  # 🔧 启用一词多义检测
         )
@@ -796,9 +796,9 @@ class TermDisambiguator:
         relation_result = self.process_terms_pipeline(
             terms=relation_terms,
             json_path=relation_json_path,
-            synonym_threshold_low=0.73,
-            synonym_threshold_high=0.85,
-            polysemy_threshold=0.73,
+            synonym_threshold_low=0.62,
+            synonym_threshold_high=0.92,
+            polysemy_threshold=0.72,
             shared_context=relation_shared_context,
             force_polysemy_check=True  # 🔧 启用一词多义检测
         )
@@ -860,19 +860,20 @@ class TermDisambiguator:
 # =========================================================
 # 测试主函数 - 三组词汇分析（无上下文）
 # =========================================================
+# =========================================================
+# 测试主函数 - 只输出相似度矩阵
+# =========================================================
 if __name__ == "__main__":
-    print("=" * 60)
-    print("术语消歧与聚类系统 - 三组词汇分析（无上下文）")
-    print("=" * 60)
+    print("术语消歧与聚类系统 - 相似度矩阵分析")
     
     disambiguator = TermDisambiguator(api_provider="qianwen")
     
     # =========================================================
     # 第一组：完全相同的词 (True Synonyms)
     # =========================================================
-    print("\n" + "=" * 60)
-    print("第一组：完全相同的词 (True Synonyms)")
-    print("=" * 60)
+    print("\n" + "=" * 80)
+    print("第一组：完全相同的词 - 相似度矩阵")
+    print("=" * 80)
     
     group1_terms = [
         "土豆", "马铃薯", "吉他", "六弦琴", "嫉妒", "妒忌", 
@@ -880,36 +881,23 @@ if __name__ == "__main__":
         "玉米", "苞米", "自行车", "脚踏车", "慷慨", "大方", "痊愈", "康复"
     ]
     
-    print(f"术语数量: {len(group1_terms)}")
-    print(f"术语列表: {group1_terms}")
-    
-    # 为每个术语生成解释和嵌入向量（无上下文）
+    # 为每个术语生成解释和嵌入向量
     group1_results = []
     for term in group1_terms:
         explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
         group1_results.append({
             "term": term,
-            "explanation": explanation,
             "embedding": embedding
         })
-        print(f"\n术语: {term}")
-        print(f"解释: {explanation}")
-        print(f"嵌入向量长度: {len(embedding)}")
     
     # 计算相似度矩阵
-    print("\n" + "-" * 80)
-    print("相似度矩阵:")
-    print("-" * 80)
-    
-    # 表头
-    print(" " * 12, end="")
+    print(" " * 10, end="")
     for result in group1_results:
         print(f"{result['term']:6}", end="")
     print()
     
-    # 矩阵内容
     for i, result1 in enumerate(group1_results):
-        print(f"{result1['term']:12}", end="")
+        print(f"{result1['term']:10}", end="")
         for j, result2 in enumerate(group1_results):
             if i == j:
                 print(" 1.000 ", end="")
@@ -921,9 +909,9 @@ if __name__ == "__main__":
     # =========================================================
     # 第二组：相关但有明确区别的词
     # =========================================================
-    print("\n" + "=" * 60)
-    print("第二组：相关但有明确区别的词")
-    print("=" * 60)
+    print("\n" + "=" * 80)
+    print("第二组：相关但有明确区别的词 - 相似度矩阵")
+    print("=" * 80)
     
     group2_terms = [
         "音乐", "乐器", "医院", "医生", "烹饪", "厨师", 
@@ -931,36 +919,23 @@ if __name__ == "__main__":
         "历史", "考古", "天气", "气候", "时间", "效率", "目标", "策略"
     ]
     
-    print(f"术语数量: {len(group2_terms)}")
-    print(f"术语列表: {group2_terms}")
-    
-    # 为每个术语生成解释和嵌入向量（无上下文）
+    # 为每个术语生成解释和嵌入向量
     group2_results = []
     for term in group2_terms:
         explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
         group2_results.append({
             "term": term,
-            "explanation": explanation,
             "embedding": embedding
         })
-        print(f"\n术语: {term}")
-        print(f"解释: {explanation}")
-        print(f"嵌入向量长度: {len(embedding)}")
     
     # 计算相似度矩阵
-    print("\n" + "-" * 100)
-    print("相似度矩阵:")
-    print("-" * 100)
-    
-    # 表头
-    print(" " * 12, end="")
+    print(" " * 10, end="")
     for result in group2_results:
         print(f"{result['term']:6}", end="")
     print()
     
-    # 矩阵内容
     for i, result1 in enumerate(group2_results):
-        print(f"{result1['term']:12}", end="")
+        print(f"{result1['term']:10}", end="")
         for j, result2 in enumerate(group2_results):
             if i == j:
                 print(" 1.000 ", end="")
@@ -972,9 +947,9 @@ if __name__ == "__main__":
     # =========================================================
     # 第三组：有相同上位词的并列词
     # =========================================================
-    print("\n" + "=" * 60)
-    print("第三组：有相同上位词的并列词")
-    print("=" * 60)
+    print("\n" + "=" * 80)
+    print("第三组：有相同上位词的并列词 - 相似度矩阵")
+    print("=" * 80)
     
     group3_terms = [
         "悲伤", "喜悦", "愤怒", "加法", "减法", "乘法", 
@@ -984,36 +959,23 @@ if __name__ == "__main__":
         "煎", "炒", "蒸", "炸", "钢笔", "铅笔", "马克笔"
     ]
     
-    print(f"术语数量: {len(group3_terms)}")
-    print(f"术语列表: {group3_terms}")
-    
-    # 为每个术语生成解释和嵌入向量（无上下文）
+    # 为每个术语生成解释和嵌入向量
     group3_results = []
     for term in group3_terms:
         explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
         group3_results.append({
             "term": term,
-            "explanation": explanation,
             "embedding": embedding
         })
-        print(f"\n术语: {term}")
-        print(f"解释: {explanation}")
-        print(f"嵌入向量长度: {len(embedding)}")
     
     # 计算相似度矩阵
-    print("\n" + "-" * 120)
-    print("相似度矩阵:")
-    print("-" * 120)
-    
-    # 表头
-    print(" " * 10, end="")
+    print(" " * 8, end="")
     for result in group3_results:
         print(f"{result['term']:6}", end="")
     print()
     
-    # 矩阵内容
     for i, result1 in enumerate(group3_results):
-        print(f"{result1['term']:10}", end="")
+        print(f"{result1['term']:8}", end="")
         for j, result2 in enumerate(group3_results):
             if i == j:
                 print(" 1.000 ", end="")
@@ -1021,102 +983,3 @@ if __name__ == "__main__":
                 sim = disambiguator._cos(result1['embedding'], result2['embedding'])
                 print(f" {sim:.3f} ", end="")
         print()
-    
-    # =========================================================
-    # 聚类分析测试 - 对所有术语进行聚类
-    # =========================================================
-    print("\n" + "=" * 60)
-    print("聚类分析测试 - 使用Clusterer函数对所有术语进行聚类")
-    print("=" * 60)
-    
-    # 合并所有术语进行聚类测试
-    all_terms = group1_terms + group2_terms + group3_terms
-    
-    print(f"总术语数: {len(all_terms)}")
-    
-    # 使用clusterer函数进行聚类分析（无上下文）
-    cluster_result = disambiguator.clusterer(terms=all_terms)
-    
-    # 显示聚类结果
-    print("\n聚类结果统计:")
-    print(f"新增术语: {len(cluster_result['new_terms'])}")
-    print(f"同义词对: {len(cluster_result['synonym_pairs'])}")
-    print(f"多义拆分: {len(cluster_result['disambiguations'])}")
-    
-    # 显示具体的同义词对
-    if cluster_result['synonym_pairs']:
-        print("\n识别出的同义词对:")
-        for pair in cluster_result['synonym_pairs']:
-            print(f"  {pair[0]} → {pair[1]}")
-    
-    # 显示多义拆分结果
-    if cluster_result['disambiguations']:
-        print("\n多义拆分结果:")
-        for disambig in cluster_result['disambiguations']:
-            print(f"  {disambig[0]} → {disambig[1]} 和 {disambig[2]}")
-    
-    # =========================================================
-    # 分析总结
-    # =========================================================
-    print("\n" + "=" * 60)
-    print("分析总结")
-    print("=" * 60)
-    
-    print("第一组（完全相同的词）预期:")
-    print("  - 同义词对（如土豆/马铃薯、吉他/六弦琴）应有高相似度（>0.8）")
-    print("  - 不同概念的词（如土豆/吉他）应有较低相似度")
-    
-    print("\n第二组（相关但有明确区别的词）预期:")
-    print("  - 相关概念对（如音乐/乐器、医院/医生）应有中等相似度（0.5-0.8）")
-    print("  - 不相关概念应有较低相似度")
-    
-    print("\n第三组（并列词）预期:")
-    print("  - 同类别词（如悲伤/喜悦、篮球/足球）应有中等相似度")
-    print("  - 不同类别词（如悲伤/篮球）应有较低相似度")
-    
-    print("\n聚类分析预期:")
-    print("  - 第一组的同义词应该被正确聚类")
-    print("  - 第二组和第三组的相关词可能被识别为同义词，需要LLM确认")
-    print("  - 注意：第三组中的'医生'与第二组重复，可能触发一词多义检测")
-    
-    # =========================================================
-    # 同义词对验证
-    # =========================================================
-    print("\n" + "=" * 60)
-    print("同义词对验证")
-    print("=" * 60)
-    
-    # 验证第一组中的同义词对是否被正确识别
-    expected_synonym_pairs = [
-        ("土豆", "马铃薯"), ("吉他", "六弦琴"), ("嫉妒", "妒忌"),
-        ("出租车", "的士"), ("水泥", "洋灰"), ("演讲", "讲演"),
-        ("玉米", "苞米"), ("自行车", "脚踏车"), ("慷慨", "大方"), ("痊愈", "康复")
-    ]
-    
-    found_pairs = []
-    for expected_pair in expected_synonym_pairs:
-        term1, term2 = expected_pair
-        # 检查是否在聚类结果中被识别为同义词
-        found = False
-        for actual_pair in cluster_result['synonym_pairs']:
-            if (actual_pair[0] == term1 and actual_pair[1] == term2) or \
-               (actual_pair[0] == term2 and actual_pair[1] == term1):
-                found = True
-                break
-        found_pairs.append((expected_pair, found))
-    
-    print("同义词识别准确率:")
-    correct_count = sum(1 for _, found in found_pairs if found)
-    accuracy = correct_count / len(found_pairs) * 100
-    print(f"  预期同义词对: {len(found_pairs)}")
-    print(f"  正确识别: {correct_count}")
-    print(f"  准确率: {accuracy:.1f}%")
-    
-    # 显示具体结果
-    for pair, found in found_pairs:
-        status = "✅" if found else "❌"
-        print(f"  {status} {pair[0]} - {pair[1]}")
-    
-    print("\n" + "=" * 60)
-    print("测试完成！")
-    print("=" * 60)
