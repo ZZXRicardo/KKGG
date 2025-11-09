@@ -1,0 +1,27 @@
+[
+  {
+    "task": "entity_disambiguation",
+    "processed_indices": [],
+    "current_index": 0
+  },
+  {
+    "task": "concept_clustering",
+    "processed_indices": [],
+    "current_index": 0
+  },
+  {
+    "task": "evaluation",
+    "processed_indices": [],
+    "current_index": 0
+  },
+  {
+    "task": "entity_extraction",
+    "processed_indices": [],
+    "current_index": 0
+  },
+  {
+    "task": "relation_extraction",
+    "processed_indices": [],
+    "current_index": 0
+  }
+]

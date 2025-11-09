@@ -176,7 +176,8 @@ class LLM:
                 else:
                     return "未获取到有效回复"
             elif self.api_provider == "qianwen":
-                return api_response['output']['choices'][0]['message']['content']
+                # 修复：千问API的响应格式是 {'output': {'text': '...', ...}}
+                return api_response['output']['text']
             elif self.api_provider == "doubao":
                 return api_response['choices'][0]['message']['content']
         except (KeyError, IndexError, TypeError) as e:

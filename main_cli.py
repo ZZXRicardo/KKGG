@@ -4,6 +4,7 @@
 """
 主要命令行工具，用于执行图谱构建的各项任务
 包括：实体提取、关系提取、实体消歧、局部概念聚类
+支持按文章逐个处理、增量输出和断点续处理
 """
 
 import argparse
@@ -55,6 +56,17 @@ class MainCLI(CLI):
                                 help='概念聚类使用的方法')
         self.parser.add_argument('--cluster_num', type=int, default=-1,
                                 help='聚类数量，-1表示自动确定')
+        
+        # 新增：断点续处理参数
+        self.parser.add_argument('--start_index', type=int, default=0,
+                                help='开始处理的文章索引（包含）')
+        self.parser.add_argument('--end_index', type=int, default=-1,
+                                help='结束处理的文章索引（包含），-1表示处理到末尾')
+        self.parser.add_argument('--resume', action='store_true',
+                                help='从进度文件恢复处理')
+        self.parser.add_argument('--progress_file', type=str, 
+                                default=r'E:\KKGG\project\process.json',
+                                help='进度文件路径')
     
     def run(self, args):
         """
@@ -117,45 +129,194 @@ class MainCLI(CLI):
         )
         logging.info("关系提取任务完成")
     
+    def _ensure_progress_file_exists(self, progress_file: str):
+        """确保进度文件存在且格式正确"""
+        progress_dir = os.path.dirname(progress_file)
+        os.makedirs(progress_dir, exist_ok=True)
+        
+        if not os.path.exists(progress_file):
+            # 创建空的进度文件
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            logging.info(f"创建进度文件: {progress_file}")
+    
+    def _load_progress(self, progress_file: str, task_name: str) -> Dict:
+        """加载指定任务的进度"""
+        self._ensure_progress_file_exists(progress_file)
+        
+        try:
+            with open(progress_file, 'r', encoding='utf-8') as f:
+                all_progress = json.load(f)
+            
+            # 查找指定任务的进度
+            for task_progress in all_progress:
+                if task_progress.get("task") == task_name:
+                    return task_progress
+            
+            # 如果找不到指定任务的进度，返回默认值
+            logging.info(f"未找到任务 {task_name} 的进度记录，使用默认值")
+        except Exception as e:
+            logging.warning(f"读取进度文件失败: {e}")
+        
+        # 返回默认进度
+        return {
+            "task": task_name,
+            "processed_indices": [],
+            "current_index": 0
+        }
+    
+    def _save_progress(self, progress_file: str, task_progress: Dict):
+        """保存指定任务的进度"""
+        try:
+            # 确保目录存在
+            self._ensure_progress_file_exists(progress_file)
+            
+            # 读取所有进度
+            all_progress = []
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    all_progress = json.load(f)
+            
+            # 更新或添加当前任务的进度
+            task_name = task_progress["task"]
+            found = False
+            for i, progress in enumerate(all_progress):
+                if progress.get("task") == task_name:
+                    all_progress[i] = task_progress
+                    found = True
+                    break
+            
+            if not found:
+                all_progress.append(task_progress)
+            
+            # 保存所有进度
+            with open(progress_file, 'w', encoding='utf-8') as f:
+                json.dump(all_progress, f, ensure_ascii=False, indent=2)
+            
+            logging.debug(f"进度已保存: {progress_file} (任务: {task_name})")
+        except Exception as e:
+            logging.error(f"保存进度文件失败: {e}")
+    
     def _run_entity_disambiguation(self, args):
         """
-        执行实体消歧任务
-        
-        从输出.json中：
-        1. 遍历relations数组，识别所有词的label属性
-        2. 收集所有label=='a'的词（不论在head还是tail位置）
-        3. 收集所有关系词（triple[1]）
-        4. 调用Disambiguate函数进行消歧
-        5. 将更新后的词替换回原三元组
+        执行实体消歧任务 - 按文章逐个处理
         
         Args:
             args: 命令行参数
         """
-        logging.info("开始实体消歧任务")
+        logging.info("开始实体消歧任务（按文章逐个处理）")
         
         # 定义输入输出路径
         input_json_path = r"E:\KKGG\output\KG\输出.json"
+        output_json_path = r"E:\KKGG\output\KG\输出_消歧后.json"
+        progress_file = args.progress_file
+        task_name = "entity_disambiguation"
+        
+        # ✅ 修复：检查输入文件是否存在
+        if not os.path.exists(input_json_path):
+            logging.error(f"输入文件不存在: {input_json_path}")
+            # 创建初始进度并保存
+            progress = {
+                "task": task_name,
+                "processed_indices": [],
+                "current_index": 0
+            }
+            self._save_progress(progress_file, progress)
+            return
         
         # 读取JSON数据
         try:
             with open(input_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            logging.info(f"成功读取输入文件: {input_json_path}")
+            logging.info(f"成功读取输入文件: {input_json_path}, 共 {len(data)} 篇文章")
         except Exception as e:
             logging.error(f"读取输入文件失败: {e}")
+            # ✅ 修复：即使读取失败也保存进度
+            progress = {
+                "task": task_name,
+                "processed_indices": [],
+                "current_index": 0
+            }
+            self._save_progress(progress_file, progress)
             return
         
-        # 收集所有label=='a'的实体（不论位置）和所有关系词
-        entity_a_terms = set()      # label=='a'的实体（head或tail）
-        relation_terms = set()       # 所有关系词
-        entity_context_parts = []    # 用于构建实体上下文
-        relation_context_parts = []  # 用于构建关系上下文
+        # 加载进度
+        progress = self._load_progress(progress_file, task_name)
+        if args.resume:
+            start_index = progress.get("current_index", args.start_index)
+            logging.info(f"从进度恢复，开始索引: {start_index}")
+        else:
+            start_index = args.start_index
+            progress = {
+                "task": task_name,
+                "processed_indices": [],
+                "current_index": start_index
+            }
+            # ✅ 修复：立即保存初始进度
+            self._save_progress(progress_file, progress)
         
-        for item in data:
-            if 'results' not in item:
+        end_index = args.end_index if args.end_index != -1 else len(data) - 1
+        
+        logging.info(f"处理范围: 索引 {start_index} 到 {end_index}")
+        
+        # ✅ 修复：检查数据是否为空
+        if not data:
+            logging.warning("输入数据为空，跳过处理")
+            return
+        
+        # 初始化输出数据
+        if os.path.exists(output_json_path):
+            try:
+                with open(output_json_path, 'r', encoding='utf-8') as f:
+                    output_data = json.load(f)
+                logging.info(f"加载现有输出文件: {output_json_path}")
+            except Exception as e:
+                logging.warning(f"读取输出文件失败，创建新文件: {e}")
+                output_data = []
+        else:
+            output_data = []
+        
+        # 确保输出数据长度与输入一致
+        while len(output_data) < len(data):
+            output_data.append(None)
+        
+        # ✅ 修复：在处理循环开始前保存进度
+        self._save_progress(progress_file, progress)
+        
+        # 逐个文章处理
+        for idx in range(start_index, end_index + 1):
+            if idx >= len(data):
+                logging.warning(f"索引 {idx} 超出数据范围，跳过")
                 continue
                 
-            for result in item['results']:
+            article = data[idx]
+            article_name = article.get('name', f'文章_{idx}')
+            article_url = article.get('metadata', {}).get('url', '未知URL')
+            
+            logging.info(f"\n{'='*60}")
+            logging.info(f"处理第 {idx} 篇文章: {article_name}")
+            logging.info(f"URL: {article_url}")
+            logging.info(f"{'='*60}")
+            
+            # 更新进度
+            progress["current_index"] = idx
+            if idx not in progress["processed_indices"]:
+                progress["processed_indices"].append(idx)
+            
+            # ✅ 修复：立即保存进度，无论处理结果如何
+            self._save_progress(progress_file, progress)
+            
+            # 收集当前文章的实体和关系
+            entity_a_terms = set()
+            relation_terms = set()
+            entity_context_parts = []
+            relation_context_parts = []
+            
+            # 使用文章全文内容作为上下文
+            article_content = article.get('content', '')
+            
+            # 遍历当前文章的所有结果
+            for result in article.get('results', []):
                 if 'output' not in result:
                     continue
                 
@@ -174,79 +335,99 @@ class MainCLI(CLI):
                             head = triple[0]
                             relation = triple[1]
                             tail = triple[2]
-                            head_label = labels[0]  # head的label
-                            tail_label = labels[1]  # tail的label
+                            head_label = labels[0]
+                            tail_label = labels[1]
                             
-                            # 1. 检查head的label，如果是'a'则收集
+                            # 收集label='a'的实体
                             if head_label and str(head_label).lower() == 'a' and head:
                                 entity_a_terms.add(head)
                                 entity_context_parts.append(f"{head} {relation} {tail}")
-                                logging.debug(f"找到label='a'的实体(head): {head}")
                             
-                            # 2. 检查tail的label，如果是'a'则收集
                             if tail_label and str(tail_label).lower() == 'a' and tail:
                                 entity_a_terms.add(tail)
                                 entity_context_parts.append(f"{head} {relation} {tail}")
-                                logging.debug(f"找到label='a'的实体(tail): {tail}")
                             
-                            # 3. 收集所有关系词
+                            # 收集所有关系词
                             if relation:
                                 relation_terms.add(relation)
                             
-                            # 4. 构建关系上下文
                             relation_context_parts.append(f"{head} {relation} {tail}")
-        
-        # 转换为列表
-        entity_a_list = sorted(list(entity_a_terms))
-        relation_list = sorted(list(relation_terms))
-        
-        logging.info(f"收集到 {len(entity_a_list)} 个label='a'的实体（不论位置）")
-        logging.info(f"收集到 {len(relation_list)} 个关系词")
-        logging.info(f"实体样例: {entity_a_list[:5]}")
-        logging.info(f"关系样例: {relation_list[:5]}")
-        
-        if not entity_a_list and not relation_list:
-            logging.warning("未找到任何实体或关系词，跳过消歧")
-            return
-        
-        # 构建共享上下文（限制长度避免过长）
-        entity_shared_context = " ".join(entity_context_parts[:100])
-        relation_shared_context = " ".join(relation_context_parts[:100])
-        
-        # 初始化消歧器并执行消歧
-        disambiguator = TermDisambiguator(api_provider="qianwen")
-        
-        try:
-            # ✅ 修复：只传入方法定义中接受的参数
-            updated_entities, updated_relations = disambiguator.Disambiguate(
-                entity_terms=entity_a_list,
-                relation_terms=relation_list,
-                entity_shared_context=entity_shared_context,
-                relation_shared_context=relation_shared_context
-            )
             
-            logging.info(f"消歧完成 - 更新后实体数: {len(updated_entities)}, 关系数: {len(updated_relations)}")
+            # 转换为列表
+            entity_a_list = sorted(list(entity_a_terms))
+            relation_list = sorted(list(relation_terms))
             
-        except Exception as e:
-            logging.error(f"消歧过程出错: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
-            return
-        
-        # 创建映射字典：原术语 -> 更新后术语
-        entity_mapping = dict(zip(entity_a_list, updated_entities))
-        relation_mapping = dict(zip(relation_list, updated_relations))
-        
-        logging.info(f"实体映射示例: {dict(list(entity_mapping.items())[:3])}")
-        logging.info(f"关系映射示例: {dict(list(relation_mapping.items())[:3])}")
-        
-        # 更新原JSON数据中的三元组
-        updated_count = 0
-        for item in data:
-            if 'results' not in item:
-                continue
+            logging.info(f"收集到 {len(entity_a_list)} 个label='a'的实体")
+            logging.info(f"收集到 {len(relation_list)} 个关系词")
+            logging.info(f"实体: {entity_a_list}")
+            logging.info(f"关系: {relation_list}")
+            
+            if not entity_a_list and not relation_list:
+                logging.info(f"文章 {idx} 没有需要消歧的实体和关系，跳过")
+                # 保存原始数据到输出
+                output_data[idx] = article
                 
-            for result in item['results']:
+                # 增量保存输出文件
+                try:
+                    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+                    current_output = [item if item is not None else data[i] for i, item in enumerate(output_data)]
+                    with open(output_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(current_output, f, ensure_ascii=False, indent=2)
+                    logging.info(f"增量保存: {output_json_path}")
+                except Exception as e:
+                    logging.error(f"保存输出文件失败: {e}")
+                
+                continue
+            
+            # 使用文章全文作为主要上下文，三元组作为补充
+            entity_shared_context = article_content + " " + " ".join(entity_context_parts[:50])
+            relation_shared_context = article_content + " " + " ".join(relation_context_parts[:50])
+            
+            # 初始化消歧器并执行消歧
+            disambiguator = TermDisambiguator(api_provider="qianwen")
+            
+            try:
+                updated_entities, updated_relations = disambiguator.Disambiguate(
+                    entity_terms=entity_a_list,
+                    relation_terms=relation_list,
+                    entity_shared_context=entity_shared_context,
+                    relation_shared_context=relation_shared_context
+                )
+                
+                logging.info(f"消歧完成 - 更新后实体数: {len(updated_entities)}, 关系数: {len(updated_relations)}")
+                
+            except Exception as e:
+                logging.error(f"文章 {idx} 消歧过程出错: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+                # 出错时保存原始数据
+                output_data[idx] = article
+                
+                # 增量保存输出文件
+                try:
+                    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+                    current_output = [item if item is not None else data[i] for i, item in enumerate(output_data)]
+                    with open(output_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(current_output, f, ensure_ascii=False, indent=2)
+                    logging.info(f"增量保存: {output_json_path}")
+                except Exception as e:
+                    logging.error(f"保存输出文件失败: {e}")
+                
+                continue
+            
+            # 创建映射字典
+            entity_mapping = dict(zip(entity_a_list, updated_entities))
+            relation_mapping = dict(zip(relation_list, updated_relations))
+            
+            logging.info(f"实体映射: {entity_mapping}")
+            logging.info(f"关系映射: {relation_mapping}")
+            
+            # 复制文章数据并更新三元组
+            updated_article = json.loads(json.dumps(article))  # 深拷贝
+            
+            # 更新当前文章的三元组
+            updated_count = 0
+            for result in updated_article.get('results', []):
                 if 'output' not in result or 'relations' not in result['output']:
                     continue
                 
@@ -259,71 +440,138 @@ class MainCLI(CLI):
                     if len(triple) >= 3:
                         head, relation, tail = triple[0], triple[1], triple[2]
                         
-                        # 更新head（如果在entity_mapping中）
+                        # 更新术语
                         if head in entity_mapping and entity_mapping[head] != head:
                             rel['triple'][0] = entity_mapping[head]
                             updated_count += 1
-                            logging.debug(f"更新head: {head} -> {entity_mapping[head]}")
                         
-                        # 更新relation（如果在relation_mapping中）
                         if relation in relation_mapping and relation_mapping[relation] != relation:
                             rel['triple'][1] = relation_mapping[relation]
                             updated_count += 1
-                            logging.debug(f"更新relation: {relation} -> {relation_mapping[relation]}")
                         
-                        # 更新tail（如果在entity_mapping中）
                         if tail in entity_mapping and entity_mapping[tail] != tail:
                             rel['triple'][2] = entity_mapping[tail]
                             updated_count += 1
-                            logging.debug(f"更新tail: {tail} -> {entity_mapping[tail]}")
-        
-        # 保存更新后的JSON
-        output_json_path = os.path.join(args.output_dir, "输出_消歧后.json")
-        try:
-            with open(output_json_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            logging.info(f"更新后的数据已保存至: {output_json_path}")
-            logging.info(f"共更新了 {updated_count} 个术语")
-        except Exception as e:
-            logging.error(f"保存更新后的文件失败: {e}")
+            
+            # 保存更新后的文章
+            output_data[idx] = updated_article
+            logging.info(f"文章 {idx} 更新完成，共更新 {updated_count} 个术语")
+            
+            # 增量保存输出文件
+            try:
+                os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+                current_output = [item if item is not None else data[i] for i, item in enumerate(output_data)]
+                with open(output_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(current_output, f, ensure_ascii=False, indent=2)
+                logging.info(f"增量保存: {output_json_path}")
+            except Exception as e:
+                logging.error(f"保存输出文件失败: {e}")
         
         logging.info("实体消歧任务完成")
+        logging.info(f"进度文件: {progress_file}")
+        logging.info(f"输出文件: {output_json_path}")
     
     def _run_concept_clustering(self, args):
         """
-        执行局部概念聚类任务
-        
-        从输出.json中：
-        1. 遍历relations数组，识别所有词的label属性
-        2. 收集所有label=='b'的词（不论在head还是tail位置）
-        3. 调用clusterer函数进行聚类（不替换原文件）
+        执行局部概念聚类任务 - 按文章逐个处理
         
         Args:
             args: 命令行参数
         """
-        logging.info("开始局部概念聚类任务")
+        logging.info("开始局部概念聚类任务（按文章逐个处理）")
         
         # 定义输入路径
         input_json_path = r"E:\KKGG\output\KG\输出.json"
+        progress_file = args.progress_file
+        task_name = "concept_clustering"
+        
+        # ✅ 修复：检查输入文件是否存在
+        if not os.path.exists(input_json_path):
+            logging.error(f"输入文件不存在: {input_json_path}")
+            # 创建初始进度并保存
+            progress = {
+                "task": task_name,
+                "processed_indices": [],
+                "current_index": 0
+            }
+            self._save_progress(progress_file, progress)
+            return
         
         # 读取JSON数据
         try:
             with open(input_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            logging.info(f"成功读取输入文件: {input_json_path}")
+            logging.info(f"成功读取输入文件: {input_json_path}, 共 {len(data)} 篇文章")
         except Exception as e:
             logging.error(f"读取输入文件失败: {e}")
+            # ✅ 修复：即使读取失败也保存进度
+            progress = {
+                "task": task_name,
+                "processed_indices": [],
+                "current_index": 0
+            }
+            self._save_progress(progress_file, progress)
             return
         
-        # 收集所有label=='b'的实体（不论位置）
-        entity_b_terms = set()   # label=='b'的实体（head或tail）
-        context_parts = []        # 用于构建共享上下文
+        # 加载进度
+        progress = self._load_progress(progress_file, task_name)
+        if args.resume:
+            start_index = progress.get("current_index", args.start_index)
+            logging.info(f"从进度恢复，开始索引: {start_index}")
+        else:
+            start_index = args.start_index
+            progress = {
+                "task": task_name,
+                "processed_indices": [],
+                "current_index": start_index
+            }
+            # ✅ 修复：立即保存初始进度
+            self._save_progress(progress_file, progress)
         
-        for item in data:
-            if 'results' not in item:
+        end_index = args.end_index if args.end_index != -1 else len(data) - 1
+        
+        logging.info(f"处理范围: 索引 {start_index} 到 {end_index}")
+        
+        # ✅ 修复：检查数据是否为空
+        if not data:
+            logging.warning("输入数据为空，跳过处理")
+            return
+        
+        # ✅ 修复：在处理循环开始前保存进度
+        self._save_progress(progress_file, progress)
+        
+        # 逐个文章处理
+        for idx in range(start_index, end_index + 1):
+            if idx >= len(data):
+                logging.warning(f"索引 {idx} 超出数据范围，跳过")
                 continue
                 
-            for result in item['results']:
+            article = data[idx]
+            article_name = article.get('name', f'文章_{idx}')
+            article_url = article.get('metadata', {}).get('url', '未知URL')
+            
+            logging.info(f"\n{'='*60}")
+            logging.info(f"处理第 {idx} 篇文章: {article_name}")
+            logging.info(f"URL: {article_url}")
+            logging.info(f"{'='*60}")
+            
+            # 更新进度
+            progress["current_index"] = idx
+            if idx not in progress["processed_indices"]:
+                progress["processed_indices"].append(idx)
+            
+            # ✅ 修复：立即保存进度，无论处理结果如何
+            self._save_progress(progress_file, progress)
+            
+            # 收集当前文章的label='b'的实体
+            entity_b_terms = set()
+            context_parts = []
+            
+            # 使用文章全文内容作为上下文
+            article_content = article.get('content', '')
+            
+            # 遍历当前文章的所有结果
+            for result in article.get('results', []):
                 if 'output' not in result:
                     continue
                 
@@ -342,58 +590,55 @@ class MainCLI(CLI):
                             head = triple[0]
                             relation = triple[1]
                             tail = triple[2]
-                            head_label = labels[0]  # head的label
-                            tail_label = labels[1]  # tail的label
+                            head_label = labels[0]
+                            tail_label = labels[1]
                             
-                            # 1. 检查head的label，如果是'b'则收集
+                            # 收集label='b'的实体
                             if head_label and str(head_label).lower() == 'b' and head:
                                 entity_b_terms.add(head)
                                 context_parts.append(f"{head} {relation} {tail}")
-                                logging.debug(f"找到label='b'的实体(head): {head}")
                             
-                            # 2. 检查tail的label，如果是'b'则收集
                             if tail_label and str(tail_label).lower() == 'b' and tail:
                                 entity_b_terms.add(tail)
                                 context_parts.append(f"{head} {relation} {tail}")
-                                logging.debug(f"找到label='b'的实体(tail): {tail}")
-        
-        # 转换为列表
-        entity_b_list = sorted(list(entity_b_terms))
-        
-        logging.info(f"收集到 {len(entity_b_list)} 个label='b'的实体（不论位置）")
-        logging.info(f"实体样例: {entity_b_list[:10]}")
-        
-        if not entity_b_list:
-            logging.warning("未找到任何label='b'的实体，跳过聚类")
-            return
-        
-        # 构建共享上下文（限制长度）
-        shared_context = " ".join(context_parts[:200])
-        
-        # 初始化聚类器并执行聚类
-        clusterer = TermDisambiguator(api_provider="qianwen")
-        
-        try:
-            # ✅ 修复：只传入方法定义中接受的参数
-            cluster_result = clusterer.clusterer(
-                terms=entity_b_list,
-                shared_context=shared_context
-            )
             
-            logging.info(f"聚类完成 - 生成的聚类结果已保存")
-            logging.info(f"聚类结果包含 {len(cluster_result)} 个术语的三元组信息")
+            # 转换为列表
+            entity_b_list = sorted(list(entity_b_terms))
             
-            # 打印部分聚类结果
-            for i, (term, triples) in enumerate(list(cluster_result.items())[:3]):
-                logging.info(f"术语 '{term}' 的三元组数量: {len(triples)}")
+            logging.info(f"收集到 {len(entity_b_list)} 个label='b'的实体")
+            logging.info(f"实体: {entity_b_list}")
+            
+            if not entity_b_list:
+                logging.info(f"文章 {idx} 没有需要聚类的实体，跳过")
+                continue
+            
+            # 使用文章全文作为主要上下文，三元组作为补充
+            shared_context = article_content + " " + " ".join(context_parts[:100])
+            
+            # 初始化聚类器并执行聚类
+            clusterer = TermDisambiguator(api_provider="qianwen")
+            
+            try:
+                cluster_result = clusterer.clusterer(
+                    terms=entity_b_list,
+                    shared_context=shared_context
+                )
                 
-        except Exception as e:
-            logging.error(f"聚类过程出错: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
-            return
+                logging.info(f"文章 {idx} 聚类完成")
+                logging.info(f"聚类结果包含 {len(cluster_result)} 个术语的三元组信息")
+                
+                # 记录部分聚类结果
+                for i, (term, triples) in enumerate(list(cluster_result.items())[:3]):
+                    logging.info(f"术语 '{term}' 的三元组数量: {len(triples)}")
+                    
+            except Exception as e:
+                logging.error(f"文章 {idx} 聚类过程出错: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+                continue
         
         logging.info("局部概念聚类任务完成")
+        logging.info(f"进度文件: {progress_file}")
 
 
 if __name__ == "__main__":
