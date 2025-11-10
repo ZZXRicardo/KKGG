@@ -2,16 +2,7 @@ import re
 from typing import Dict, List, Tuple
 
 class TaskTokenCalculator:
-    """
-    基于DeepSeek标准的任务token计算器
-    根据文档：1个英文字符≈0.3token，1个中文字符≈0.6token
-    """
-    
-    def __init__(self):
-        self.token_rates = {
-            'chinese': 0.6,  # 中文字符token率
-            'english': 0.3,  # 英文字符token率
-        }
+
     
     def count_chars(self, text: str) -> Tuple[int, int]:
         """统计中英文字符数量"""
@@ -79,58 +70,58 @@ class TaskTokenCalculator:
             'task': 'triple_extraction'
         }
     
-    # ==================== 实体削齐 ====================
-    def entity_alignment_estimate(self, entities: List[str], alignment_config: Dict = None) -> Dict[str, float]:
+    # ==================== 实体削齐+概念聚类 ====================
+    def entity_alignment_concept_clustering_estimate(self, content_length, model_name, x_values=[0.344, 0.183, 0.411]):
         """
-        实体削齐任务token估算
+        计算实体消歧和概念聚类任务的API token数
         
         Args:
-            entities: 实体列表
-            alignment_config: 削齐配置 [待补充配置参数]
+            content_length: 内容字数
+            model_name: 模型名称，只能是"qianwen"或"deepseek"
+            x_values: 三个X值数组，默认为[0.344, 0.183, 0.411]
         
         Returns:
-            包含输入、输出和总token的字典
+            两个任务的总token数
         """
-        # 输入token计算（将所有实体连接为文本）
-        input_text = " ".join(entities)
-        input_tokens = self.calculate_tokens(input_text)
+        # 计算三种词的数量
+        term_count_1 = content_length / 11.78  # 第一组词数量
+        term_count_2 = content_length / 9.35   # 第二组词数量
+        term_count_3 = content_length / 15.92  # 第三组词数量
         
-        # 输出token估算规则: [待补充实体削齐输出估算规则]
-        output_tokens = 0  # 待实现
+        # 计算每种词每个术语的API通讯量
+        term_api_1 = 102.52 + 81 * x_values[0]  # 第一组词每个术语的API通讯量
+        term_api_2 = 102.52 + 81 * x_values[1]  # 第二组词每个术语的API通讯量
+        term_api_3 = 102.52 + 81 * x_values[2]  # 第三组词每个术语的API通讯量
         
-        return {
-            'input_tokens': input_tokens,
-            'output_tokens': output_tokens,
-            'total_tokens': input_tokens + output_tokens,
-            'task': 'entity_alignment'
-        }
+        # 计算每种词的总API通讯量
+        total_api_1 = term_api_1 * term_count_1  # 第一组词总API通讯量
+        total_api_2 = term_api_2 * term_count_2  # 第二组词总API通讯量
+        total_api_3 = term_api_3 * term_count_3  # 第三组词总API通讯量
+        
+        # 计算任务总字数
+        task1_total_chars = total_api_1 + total_api_3 + 2 * content_length  # 实体消歧任务总字数
+        task2_total_chars = total_api_2 + content_length  # 概念聚类任务总字数
+        
+        # 根据模型计算token数
+        if model_name.lower() == "deepseek":
+            task1_tokens = task1_total_chars * 0.6
+            task2_tokens = task2_total_chars * 0.6
+        elif model_name.lower() == "qianwen":
+            task1_tokens = task1_total_chars * 1.0
+            task2_tokens = task2_total_chars * 1.0
+        else:
+            print(f"实体消歧任务总字数: {task1_total_chars:.2f}")
+            print(f"概念聚类任务总字数: {task2_total_chars:.2f}")
+            print("模型名称无效，请输入'qianwen'或'deepseek'")
+            return None, None
+        
+        # 打印结果
+        print(f"实体消歧任务总token数: {task1_tokens:.2f}")
+        print(f"概念聚类任务总token数: {task2_tokens:.2f}")
+        
+        return task1_tokens, task2_tokens
     
-    # ==================== 概念聚类 ====================
-    def concept_clustering_estimate(self, concepts: List[str], clustering_config: Dict = None) -> Dict[str, float]:
-        """
-        概念聚类任务token估算
-        
-        Args:
-            concepts: 概念列表
-            clustering_config: 聚类配置 [待补充配置参数]
-        
-        Returns:
-            包含输入、输出和总token的字典
-        """
-        # 输入token计算（将所有概念连接为文本）
-        input_text = " ".join(concepts)
-        input_tokens = self.calculate_tokens(input_text)
-        
-        # 输出token估算规则: [待补充概念聚类输出估算规则]
-        output_tokens = 0  # 待实现
-        
-        return {
-            'input_tokens': input_tokens,
-            'output_tokens': output_tokens,
-            'total_tokens': input_tokens + output_tokens,
-            'task': 'concept_clustering'
-        }
-    
+
     # ==================== 质量评估 ====================
     def quality_assessment_estimate(self, input_text: str, assessment_config: Dict = None) -> Dict[str, float]:
         """

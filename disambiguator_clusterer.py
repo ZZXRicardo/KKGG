@@ -1,5 +1,5 @@
-# 文件：解释聚类削歧_类封装版_修复一词多义.py
-# ✅ 修复一词多义检测失效问题
+# 文件：解释聚类削歧_类封装版_批量优化版.py
+# ✅ 优化：批量解释术语，提升效率
 
 from LLM import LLM
 from Embedding import Embedding
@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 
 
 # =========================================================
-# 主类：术语消歧器
+# 主类：术语消歧器（批量优化版）
 # =========================================================
 class TermDisambiguator:
-    """术语消歧与聚类系统"""
+    """术语消歧与聚类系统 - 批量优化版"""
     
     # =========================================================
     # 内部数据容器类
@@ -95,6 +95,182 @@ class TermDisambiguator:
         print(f"[JSON保存] 已保存至 {json_path}")
     
     # =========================================================
+    # 🆕 批量生成解释和嵌入 - 核心优化
+    # =========================================================
+    def generate_batch_explanations_and_embeddings(
+        self,
+        terms: List[str],
+        shared_context: Optional[str] = None
+    ) -> Dict[str, Tuple[str, List[float]]]:
+        """
+        批量生成多个术语的解释和嵌入向量（核心优化方法）
+        
+        Args:
+            terms: 待解释的术语列表
+            shared_context: 包含所有术语的共享上下文
+        
+        Returns:
+            Dict[术语, (解释, 嵌入向量)]
+        """
+        if not terms:
+            return {}
+        
+        print(f"\n[批量解释] 开始批量处理 {len(terms)} 个术语")
+        
+        # 构建批量解释的prompt
+        base_instruction = (
+            "你是给高中生写词条定义的老师，请用『一句中文』解释给定的每个术语，"
+            "不要出现术语本身，也不要用「X 是……」的句式；直接给出定义内容。"
+            "不要在解释的时候引入他的同义词，比如A是B的另一种称呼。"
+            "做这些解释的时候不要参考你做的其他解释，每个词语独立解释，当作每次只处理一个任务。"
+            "如果提供了共享上下文，请从上下文中提取该术语的语义进行消歧。\n"
+            "【示例-正确】「一种能自动处理信息的电子设备。」\n"
+            "【示例-错误】「电脑是一种能自动处理信息的电子设备。」（包含术语）"
+            "同时，在解释非关系词时请确保解释体现术语的本质特征，避免使用上位词和归类句式。\n\n"
+    
+            "【核心要求】\n"
+            "1. 🔍 挖掘本质：聚焦该术语最独特的、区别于其他同类事物的特征\n"
+            "2. 🚫 避免上位词：不要使用『一种XX』、『属于XX』等归类句式\n"
+            "3. 🎯 特征导向：直接描述其核心属性、功能、形态或作用机制\n"
+            "4. 📝 句式多样：避免所有解释使用相同句式结构\n"
+            "5. ❌ 禁止出现：术语本身、『是……』句式、同义词引用\n\n"
+    
+            "【错误示例】\n"
+            "苹果：一种水果，富含维生素C ❌（使用上位词）\n"
+            "橙子：一种富含维生素C的水果 ❌（句式重复）\n"
+            "升：一种容量的计量单位 ❌（过于笼统）\n"
+            "毫升：空间计量单位 ❌（特征不准确）\n\n"
+    
+            "【正确示例】\n"
+            "苹果：果皮多为红/绿色，果肉脆甜多汁，核心有籽 ✔\n"
+            "橙子：柑橘类果实，果皮橙黄易剥，果瓣多汁酸甜 ✔\n"
+            "升：等于立方分米，常用于衡量液体体积的基本单位 ✔\n"
+            "毫升：千分之一升，适用于小容量液体的精确计量 ✔\n"
+            "机器学习：通过数据训练让计算机自动改进决策能力 ✔\n"
+            "区块链：由按时间顺序连接的不可篡改数据块构成 ✔\n\n"
+        )
+        
+        # 🆕 批量解释的新提示词
+        batch_instruction = (
+            "\n【批量解释任务】\n"
+            "现在给你一组术语列表，请按照上述要求，为每个术语独立生成解释。\n"
+            "请严格按照以下JSON格式输出，不要输出任何其他内容：\n"
+            "{\n"
+            '  "术语1": "解释1",\n'
+            '  "术语2": "解释2",\n'
+            '  "术语3": "解释3"\n'
+            "}\n\n"
+            "【重要】\n"
+            "- 必须为列表中的每个术语都生成解释\n"
+            "- JSON的键必须与给定的术语完全一致\n"
+            "- 每个解释都要独立完成，不要相互参考\n"
+            "- 只输出JSON，不要包含任何其他文字、标记或格式符号\n"
+        )
+        
+        # 构建术语列表字符串
+        terms_str = "\n".join([f"{i+1}. {term}" for i, term in enumerate(terms)])
+        
+        if shared_context:
+            prompt = (
+                f"{base_instruction}\n"
+                f"{batch_instruction}\n"
+                f"【待解释术语列表】\n{terms_str}\n\n"
+                f"【共享上下文（包含多个术语，请从中提取各术语的语义）】\n{shared_context}\n\n"
+                "请按照JSON格式输出所有术语的解释："
+            )
+        else:
+            prompt = (
+                f"{base_instruction}\n"
+                f"{batch_instruction}\n"
+                f"【待解释术语列表】\n{terms_str}\n\n"
+                "请按照JSON格式输出所有术语的解释："
+            )
+        
+        # 调用LLM生成批量解释
+        print(f"  📤 发送批量解释请求...")
+        llm_instance = LLM(prompt=prompt, api_provider=self.api_provider)
+        result = llm_instance.llm_call()
+        response_text = llm_instance.extract_response(result)
+        
+        # 解析JSON响应
+        try:
+            # 清理可能的markdown代码块标记
+            response_text = response_text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+            
+            explanations_dict = json.loads(response_text)
+            print(f"  ✅ 成功解析批量解释JSON")
+        except Exception as e:
+            print(f"  ❌ 解析JSON失败: {e}")
+            print(f"  响应内容: {response_text[:200]}...")
+            # 失败时返回空字典
+            return {}
+        
+        # 为每个解释生成嵌入向量
+        print(f"  📊 开始生成嵌入向量...")
+        result_dict = {}
+        
+        # 收集所有解释文本用于批量embedding
+        explanation_texts = []
+        valid_terms = []
+        
+        for term in terms:
+            explanation = explanations_dict.get(term, "").strip()
+            if explanation:
+                explanation_texts.append(explanation)
+                valid_terms.append(term)
+            else:
+                print(f"  ⚠️  术语 '{term}' 缺少解释")
+        
+        # 批量生成嵌入向量
+        if explanation_texts:
+            try:
+                embedding = Embedding(input_texts=explanation_texts)
+                embedding_result = embedding.embedding_call()
+                vectors = embedding.extract_embeddings(embedding_result)
+                
+                if isinstance(vectors, list) and len(vectors) == len(valid_terms):
+                    for i, term in enumerate(valid_terms):
+                        result_dict[term] = (explanations_dict[term], vectors[i])
+                    print(f"  ✅ 批量生成 {len(result_dict)} 个嵌入向量")
+                else:
+                    print(f"  ⚠️  嵌入向量数量不匹配: {len(vectors)} vs {len(valid_terms)}")
+            except Exception as e:
+                print(f"  ❌ 批量生成嵌入向量失败: {e}")
+        
+        return result_dict
+    
+    # =========================================================
+    # 生成单个术语的解释和嵌入（保留用于兼容性）
+    # =========================================================
+    def generate_explanation_and_embedding(
+        self,
+        term: str,
+        shared_context: Optional[str] = None
+    ) -> Tuple[str, List[float]]:
+        """
+        为单个术语生成解释和嵌入向量
+        注意：此方法保留用于向后兼容，但建议使用批量方法
+        
+        Args:
+            term: 待解释的术语
+            shared_context: 包含所有术语的共享上下文
+        """
+        # 调用批量方法处理单个术语
+        batch_result = self.generate_batch_explanations_and_embeddings([term], shared_context)
+        
+        if term in batch_result:
+            return batch_result[term]
+        else:
+            return "", []
+    
+    # =========================================================
     # 一词多义拆分方法
     # =========================================================
     def disambiguate_term_to_two(
@@ -139,99 +315,23 @@ class TermDisambiguator:
         return term_a, term_b
     
     # =========================================================
-    # 生成单个术语的解释和嵌入
-    # =========================================================
-    def generate_explanation_and_embedding(
-        self,
-        term: str,
-        shared_context: Optional[str] = None
-    ) -> Tuple[str, List[float]]:
-        """
-        为单个术语生成解释和嵌入向量
-        
-        Args:
-            term: 待解释的术语
-            shared_context: 包含所有术语的共享上下文（非单个术语的专属上下文）
-        """
-        base_instruction = (
-            "你是给高中生写词条定义的老师，请用『一句中文』解释给定术语，"
-            "不要出现术语本身，也不要用「X 是……」的句式；直接给出定义内容。"
-            "不要在解释的时候引入他的同义词，比如A是B的另一种称呼。"
-            "做这些解释的时候不要参考你做的其他解释，每个词语独立解释，当作每次只处理一个任务。"
-            "如果提供了共享上下文，请从上下文中提取该术语的语义进行消歧。\n"
-            "【示例-正确】「一种能自动处理信息的电子设备。」\n"
-            "【示例-错误】「电脑是一种能自动处理信息的电子设备。」（包含术语）"
-            "同时，在解释非关系词时请确保解释体现术语的本质特征，避免使用上位词和归类句式。\n\n"
-    
-              "【核心要求】\n"
-            "1. 🔍 挖掘本质：聚焦该术语最独特的、区别于其他同类事物的特征\n"
-            "2. 🚫 避免上位词：不要使用『一种XX』、『属于XX』等归类句式\n"
-            "3. 🎯 特征导向：直接描述其核心属性、功能、形态或作用机制\n"
-            "4. 📝 句式多样：避免所有解释使用相同句式结构\n"
-            "5. ❌ 禁止出现：术语本身、『是……』句式、同义词引用\n\n"
-    
-           "【错误示例】\n"
-            "苹果：一种水果，富含维生素C ❌（使用上位词）\n"
-            "橙子：一种富含维生素C的水果 ❌（句式重复）\n"
-            "升：一种容量的计量单位 ❌（过于笼统）\n"
-            "毫升：空间计量单位 ❌（特征不准确）\n\n"
-    
-            "【正确示例】\n"
-            "苹果：果皮多为红/绿色，果肉脆甜多汁，核心有籽 ✔\n"
-            "橙子：柑橘类果实，果皮橙黄易剥，果瓣多汁酸甜 ✔\n"
-            "升：等于立方分米，常用于衡量液体体积的基本单位 ✔\n"
-            "毫升：千分之一升，适用于小容量液体的精确计量 ✔\n"
-            "机器学习：通过数据训练让计算机自动改进决策能力 ✔\n"
-            "区块链：由按时间顺序连接的不可篡改数据块构成 ✔\n\n"
-        )
-        
-        if shared_context:
-            prompt = (
-                f"{base_instruction}\n\n"
-                f"【术语】'{term}'\n"
-                f"【共享上下文（包含多个术语，请从中提取该术语的语义）】\n{shared_context}\n\n"
-                "只输出一句中文解释。不要出现术语本身。"
-            )
-        else:
-            prompt = (
-                f"{base_instruction}\n\n"
-                f"【术语】'{term}'\n"
-                "只输出一句中文解释。不要出现术语本身。"
-            )
-        
-        # 生成解释
-        llm_instance = LLM(prompt=prompt, api_provider=self.api_provider)
-        result = llm_instance.llm_call()
-        explanation = llm_instance.extract_response(result)
-        explanation = explanation.strip() if isinstance(explanation, str) else ""
-        
-        # 生成嵌入向量
-        embedding_vec = []
-        if explanation:
-            embedding = Embedding(input_texts=[explanation])
-            embedding_result = embedding.embedding_call()
-            vectors = embedding.extract_embeddings(embedding_result)
-            if isinstance(vectors, list) and vectors:
-                embedding_vec = vectors[0]
-        
-        return explanation, embedding_vec
-    
-    # =========================================================
-    # 核心：增量处理术语（逐个判断是否为同义词）- 🔧 已修复一词多义检测
+    # 核心：增量处理术语（逐个判断是否为同义词）
     # =========================================================
     def process_term_incrementally(
         self,
         term: str,
+        explanation: str,
+        embedding_vec: List[float],
         shared_context: Optional[str],
         json_data: List[Dict],
         json_map: Dict[str, Dict],
         synonym_threshold_low: float = 0.73,
         synonym_threshold_high: Optional[float] = 0.85,
         polysemy_threshold: float = 0.73,
-        force_polysemy_check: bool = True  # 🔧 新增：强制检查多义词
+        force_polysemy_check: bool = True
     ) -> Tuple[bool, Optional[str]]:
         """
-        增量处理单个术语（已修复一词多义检测）
+        增量处理单个术语（已修复一词多义检测）- 🆕 优化：接收预生成的解释和嵌入
         返回: (是否为同义词, 代表术语)
         - 如果是同义词: (True, 代表术语)
         - 如果不是同义词: (False, None)
@@ -247,10 +347,9 @@ class TermDisambiguator:
             if force_polysemy_check and shared_context:
                 print(f"  ℹ️  术语已存在为'{main_term}'{'的同义词' if main_term != term else '（主术语）'}，检查是否为多义词...")
                 
-                # 基于新上下文生成解释
-                new_explanation, new_embedding = self.generate_explanation_and_embedding(
-                    term, shared_context
-                )
+                # 使用已提供的解释和嵌入
+                new_explanation = explanation
+                new_embedding = embedding_vec
                 
                 if not new_embedding:
                     print(f"  ⚠️  无法生成新嵌入向量，保持原有术语")
@@ -324,11 +423,7 @@ class TermDisambiguator:
                     print(f"  ⚠️  术语已存在为'{main_term}'的同义词，跳过")
                 return True, main_term
         
-        # 2. 术语不存在，正常处理（原有逻辑）
-        explanation, embedding_vec = self.generate_explanation_and_embedding(
-            term, shared_context
-        )
-        
+        # 2. 术语不存在，使用已提供的解释和嵌入
         if not embedding_vec:
             print(f"  ❌ 无法生成嵌入向量，跳过")
             return False, None
@@ -431,6 +526,7 @@ class TermDisambiguator:
         print(f"\n[多义检测] {term} 出现 {len(indices)} 次")
         
         # 为每个出现生成解释（使用相同的共享上下文）
+        # 注意：这里必须单独调用，因为需要多次解释同一个术语以检测多义性
         explanations = []
         embeddings = []
         
@@ -453,17 +549,20 @@ class TermDisambiguator:
                     print(f"  🎯 检测到多义: 相似度={sim:.4f} < 阈值={threshold}")
                     
                     # 拆分
-                    term_a, term_b = self.disambiguate_term_to_two(
-                        term, explanations[i], explanations[j]
-                    )
-                    print(f"  ✂️  拆分为: '{term_a}' 和 '{term_b}'")
-                    return term_a, term_b
+                    try:
+                        term_a, term_b = self.disambiguate_term_to_two(
+                            term, explanations[i], explanations[j]
+                        )
+                        print(f"  ✂️  拆分为: '{term_a}' 和 '{term_b}'")
+                        return term_a, term_b
+                    except Exception as e:
+                        print(f"  ❌ 拆分失败: {e}")
         
         print(f"  ✅ 无多义")
         return None
     
     # =========================================================
-    # 生成 def聚类 三元组（只包含有同义词的术语，增量更新）
+    # 生成def聚类三元组
     # =========================================================
     def _generate_def_cluster_triples(
         self,
@@ -472,7 +571,7 @@ class TermDisambiguator:
         old_json_data: List[Dict]
     ):
         """
-        生成 def聚类 三元组，只包含有同义词的术语，并进行增量更新
+        比较新旧术语数据，为有变化的术语生成"def聚类"三元组
         
         Args:
             json_data: 当前的术语数据
@@ -576,7 +675,7 @@ class TermDisambiguator:
         print(f"  新增同义词数: {new_synonyms_count}")
     
     # =========================================================
-    # 完整流程：增量处理
+    # 🆕 完整流程：增量处理（批量优化版）
     # =========================================================
     def process_terms_pipeline(
         self,
@@ -586,10 +685,10 @@ class TermDisambiguator:
         synonym_threshold_high: Optional[float] = 0.85,
         polysemy_threshold: float = 0.73,
         shared_context: Optional[str] = None,
-        force_polysemy_check: bool = True  # 🔧 新增参数
+        force_polysemy_check: bool = True
     ) -> dict:
         """
-        增量处理术语列表
+        增量处理术语列表（批量优化版）
         
         Args:
             terms: 待处理的术语列表
@@ -598,15 +697,15 @@ class TermDisambiguator:
             synonym_threshold_high: 同义词判定高阈值
             polysemy_threshold: 多义词判定阈值
             shared_context: 包含所有术语的共享上下文
-            force_polysemy_check: 是否强制检查一词多义（新增）
+            force_polysemy_check: 是否强制检查一词多义
         """
         print("\n" + "=" * 60)
-        print("术语处理流程 - 增量版")
+        print("术语处理流程 - 批量优化版")
         print("=" * 60)
         print(f"输入术语数: {len(terms)}")
         print(f"同义词判定阈值: {synonym_threshold_low} ~ {synonym_threshold_high or '无上限'}")
         print(f"多义词拆分阈值: {polysemy_threshold}")
-        print(f"一词多义检测: {'启用' if force_polysemy_check else '禁用'}")  # 🔧 显示状态
+        print(f"一词多义检测: {'启用' if force_polysemy_check else '禁用'}")
         
         # 1. 加载已有数据
         json_data, json_map = self._load_json_terms(json_path)
@@ -629,7 +728,27 @@ class TermDisambiguator:
                     for i, idx in enumerate(indices):
                         terms[idx] = term_a if i == 0 else term_b
         
-        # 3. 增量处理每个术语
+        # 3. 🆕 批量生成解释和嵌入（核心优化）
+        print("\n" + "=" * 60)
+        print("🚀 批量生成解释和嵌入向量")
+        print("=" * 60)
+        
+        # 收集需要生成解释的术语（排除已存在的）
+        terms_to_explain = []
+        for term in terms:
+            if term not in json_map:
+                terms_to_explain.append(term)
+        
+        print(f"需要生成解释的新术语: {len(terms_to_explain)}")
+        
+        # 批量生成解释和嵌入
+        explanations_embeddings = {}
+        if terms_to_explain:
+            explanations_embeddings = self.generate_batch_explanations_and_embeddings(
+                terms_to_explain, shared_context
+            )
+        
+        # 4. 增量处理每个术语
         print("\n" + "=" * 60)
         print("开始增量处理术语")
         print("=" * 60)
@@ -638,84 +757,102 @@ class TermDisambiguator:
         synonym_pairs = []
         
         for term in terms:
+            # 获取预生成的解释和嵌入，如果没有则为空
+            if term in explanations_embeddings:
+                explanation, embedding_vec = explanations_embeddings[term]
+            elif term in json_map:
+                # 已存在的术语，从json_map获取
+                existing = json_map[term]
+                explanation = existing.get("explanation", "")
+                embedding_vec = existing.get("embedding", [])
+            else:
+                # 批量生成失败的情况，单独生成
+                print(f"  ⚠️  术语 '{term}' 批量生成失败，尝试单独生成")
+                explanation, embedding_vec = self.generate_explanation_and_embedding(term, shared_context)
+            
             is_synonym, representative = self.process_term_incrementally(
                 term=term,
+                explanation=explanation,
+                embedding_vec=embedding_vec,
                 shared_context=shared_context,
                 json_data=json_data,
                 json_map=json_map,
                 synonym_threshold_low=synonym_threshold_low,
                 synonym_threshold_high=synonym_threshold_high,
                 polysemy_threshold=polysemy_threshold,
-                force_polysemy_check=force_polysemy_check  # 🔧 传递参数
+                force_polysemy_check=force_polysemy_check
             )
             
-            if is_synonym:
-                synonym_pairs.append((term, representative))
-            else:
+            if not is_synonym:
                 new_terms.append(term)
+            else:
+                if representative:
+                    synonym_pairs.append((term, representative))
         
-        # 4. 保存
-        self._save_json_terms(json_path, json_data)
+        # 5. 保存更新
+        if json_path:
+            self._save_json_terms(json_path, json_data)
         
+        # 6. 统计输出
         print("\n" + "=" * 60)
         print("处理完成")
         print("=" * 60)
-        print(f"总术语数（JSON中）: {len(json_data)}")
         print(f"新增术语: {len(new_terms)}")
-        print(f"识别为同义词: {len(synonym_pairs)}")
+        print(f"同义词对数: {len(synonym_pairs)}")
         print(f"多义拆分: {len(disambiguations)}")
         
         return {
             "json_data": json_data,
+            "json_map": json_map,
             "new_terms": new_terms,
             "synonym_pairs": synonym_pairs,
             "disambiguations": disambiguations
         }
     
     # =========================================================
-    # Clusterer 函数：聚类 + 三元组生成（完整流程）
+    # Clusterer 函数：处理实体数组（无关系数组）
     # =========================================================
     def clusterer(
         self,
         terms: List[str],
         shared_context: Optional[str] = None
-    ) -> dict:
+    ) -> Dict[str, List[Dict]]:
         """
-        Clusterer 函数：对术语进行聚类，识别同义词，并生成 def聚类 三元组
+        概念聚类 - 只处理实体术语，返回术语的三元组
         
         Args:
-            terms: 待处理的术语列表
-            shared_context: 包含所有术语的共享上下文
+            terms: 实体术语列表
+            shared_context: 实体的共享上下文（可选）
         
         Returns:
-            处理结果字典
+            Dict[术语, 三元组列表]
         """
-        # 固定参数
-        json_path = r"E:\KKGG\output\terms\definitions.json"
-        cluster_json_path = r"E:\KKGG\output\KG\def_cluster.json"
-        synonym_threshold_low = 0.69
-        synonym_threshold_high = 0.84
-        polysemy_threshold = 0.75
-        
         print("\n" + "=" * 60)
-        print("Clusterer 函数 - 术语聚类与三元组生成")
+        print("Clusterer 函数 - 概念聚类")
         print("=" * 60)
-        print(f"术语定义JSON: {json_path}")
-        print(f"三元组JSON: {cluster_json_path}")
         
-        # 0. 保存处理前的JSON数据用于比对
-        old_json_data, _ = self._load_json_terms(json_path)
-        print(f"处理前术语数: {len(old_json_data)}")
+        # 固定参数
+        entity_json_path = r"E:\KKGG\output\terms\Entity.json"
+        cluster_json_path = r"E:\KKGG\output\terms\entity_cluster_triples.json"
         
-        # 1. 调用流程函数处理术语
+        # 保存处理前的数据
+        old_json_data, _ = self._load_json_terms(entity_json_path)
+        
+        # 1. 处理实体数组
+        print("\n" + "-" * 60)
+        print("处理实体术语")
+        print("-" * 60)
+        print(f"实体JSON路径: {entity_json_path}")
+        print(f"输入实体数: {len(terms)}")
+        
         result = self.process_terms_pipeline(
             terms=terms,
-            json_path=json_path,
-            synonym_threshold_low=synonym_threshold_low,
-            synonym_threshold_high=synonym_threshold_high,
-            polysemy_threshold=polysemy_threshold,
+            json_path=entity_json_path,
+            synonym_threshold_low=0.69,
+            synonym_threshold_high=0.84,
+            polysemy_threshold=0.75,
             shared_context=shared_context,
-            force_polysemy_check=True  # 🔧 启用一词多义检测
+            force_polysemy_check=True
         )
         
         # 2. 检查更新并生成def聚类三元组
@@ -781,7 +918,7 @@ class TermDisambiguator:
             synonym_threshold_high=0.84,
             polysemy_threshold=0.75,
             shared_context=entity_shared_context,
-            force_polysemy_check=True  # 🔧 启用一词多义检测
+            force_polysemy_check=True
         )
         
         # =========================================================
@@ -800,7 +937,7 @@ class TermDisambiguator:
             synonym_threshold_high=0.92,
             polysemy_threshold=0.72,
             shared_context=relation_shared_context,
-            force_polysemy_check=True  # 🔧 启用一词多义检测
+            force_polysemy_check=True
         )
         
         # =========================================================
@@ -856,130 +993,26 @@ class TermDisambiguator:
         return updated_entity_terms, updated_relation_terms
 
 
-
 # =========================================================
-# 测试主函数 - 三组词汇分析（无上下文）
-# =========================================================
-# =========================================================
-# 测试主函数 - 只输出相似度矩阵
+# 测试主函数（可选）
 # =========================================================
 if __name__ == "__main__":
-    print("术语消歧与聚类系统 - 相似度矩阵分析")
+    print("术语消歧器 - 批量优化版测试")
+    print("=" * 60)
     
     disambiguator = TermDisambiguator(api_provider="qianwen")
     
-    # =========================================================
-    # 第一组：完全相同的词 (True Synonyms)
-    # =========================================================
-    print("\n" + "=" * 80)
-    print("第一组：完全相同的词 - 相似度矩阵")
-    print("=" * 80)
+    # 测试批量解释功能
+    test_terms = ["苹果", "橙子", "香蕉", "机器学习", "深度学习"]
     
-    group1_terms = [
-        "土豆", "马铃薯", "吉他", "六弦琴", "嫉妒", "妒忌", 
-        "出租车", "的士", "水泥", "洋灰", "演讲", "讲演", 
-        "玉米", "苞米", "自行车", "脚踏车", "慷慨", "大方", "痊愈", "康复"
-    ]
+    result = disambiguator.generate_batch_explanations_and_embeddings(
+        terms=test_terms,
+        shared_context="这是一些水果和AI术语"
+    )
     
-    # 为每个术语生成解释和嵌入向量
-    group1_results = []
-    for term in group1_terms:
-        explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
-        group1_results.append({
-            "term": term,
-            "embedding": embedding
-        })
+    print("\n批量解释结果:")
+    for term, (explanation, embedding) in result.items():
+        print(f"  {term}: {explanation}")
+        print(f"    嵌入维度: {len(embedding)}")
     
-    # 计算相似度矩阵
-    print(" " * 10, end="")
-    for result in group1_results:
-        print(f"{result['term']:6}", end="")
-    print()
-    
-    for i, result1 in enumerate(group1_results):
-        print(f"{result1['term']:10}", end="")
-        for j, result2 in enumerate(group1_results):
-            if i == j:
-                print(" 1.000 ", end="")
-            else:
-                sim = disambiguator._cos(result1['embedding'], result2['embedding'])
-                print(f" {sim:.3f} ", end="")
-        print()
-    
-    # =========================================================
-    # 第二组：相关但有明确区别的词
-    # =========================================================
-    print("\n" + "=" * 80)
-    print("第二组：相关但有明确区别的词 - 相似度矩阵")
-    print("=" * 80)
-    
-    group2_terms = [
-        "音乐", "乐器", "医院", "医生", "烹饪", "厨师", 
-        "电影", "导演", "科学", "技术", "经济", "贸易", 
-        "历史", "考古", "天气", "气候", "时间", "效率", "目标", "策略"
-    ]
-    
-    # 为每个术语生成解释和嵌入向量
-    group2_results = []
-    for term in group2_terms:
-        explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
-        group2_results.append({
-            "term": term,
-            "embedding": embedding
-        })
-    
-    # 计算相似度矩阵
-    print(" " * 10, end="")
-    for result in group2_results:
-        print(f"{result['term']:6}", end="")
-    print()
-    
-    for i, result1 in enumerate(group2_results):
-        print(f"{result1['term']:10}", end="")
-        for j, result2 in enumerate(group2_results):
-            if i == j:
-                print(" 1.000 ", end="")
-            else:
-                sim = disambiguator._cos(result1['embedding'], result2['embedding'])
-                print(f" {sim:.3f} ", end="")
-        print()
-    
-    # =========================================================
-    # 第三组：有相同上位词的并列词
-    # =========================================================
-    print("\n" + "=" * 80)
-    print("第三组：有相同上位词的并列词 - 相似度矩阵")
-    print("=" * 80)
-    
-    group3_terms = [
-        "悲伤", "喜悦", "愤怒", "加法", "减法", "乘法", 
-        "篮球", "足球", "网球", "红色", "蓝色", "绿色", 
-        "小说", "诗歌", "散文", "医生", "律师", "会计", 
-        "春节", "中秋", "端午", "陆军", "海军", "空军", 
-        "煎", "炒", "蒸", "炸", "钢笔", "铅笔", "马克笔"
-    ]
-    
-    # 为每个术语生成解释和嵌入向量
-    group3_results = []
-    for term in group3_terms:
-        explanation, embedding = disambiguator.generate_explanation_and_embedding(term)
-        group3_results.append({
-            "term": term,
-            "embedding": embedding
-        })
-    
-    # 计算相似度矩阵
-    print(" " * 8, end="")
-    for result in group3_results:
-        print(f"{result['term']:6}", end="")
-    print()
-    
-    for i, result1 in enumerate(group3_results):
-        print(f"{result1['term']:8}", end="")
-        for j, result2 in enumerate(group3_results):
-            if i == j:
-                print(" 1.000 ", end="")
-            else:
-                sim = disambiguator._cos(result1['embedding'], result2['embedding'])
-                print(f" {sim:.3f} ", end="")
-        print()
+    print("\n测试完成")
