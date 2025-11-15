@@ -14,8 +14,8 @@ import json
 from pathlib import Path
 from typing import List, Dict, Set, Tuple
 from cli import CLI
-#from EntityExtractor import EntityExtractor
-#from relation_extraction.extractor import RelationExtractor
+from entity_extraction.extractor import EntityExtractor
+from relation_extraction.extractor import RelationExtractor
 from disambiguator_clusterer import TermDisambiguator
 
 
@@ -33,15 +33,27 @@ class MainCLI(CLI):
                                          'entity_disambiguation', 'concept_clustering', 'all'],
                                 help='要执行的任务')
         
-        # 实体提取相关参数
+        # 实体提取相关参数 
         self.parser.add_argument('--entity_model', type=str, default='default',
                                 help='实体提取使用的模型')
+        self.parser.add_argument('--entity_input_dir', type=str, required=True,
+                                help='实体提取的输入目录）')
+        self.parser.add_argument('--entity_output_dir', type=str, required=True,
+                                help='实体提取的输出目录')
+        self.parser.add_argument('--entity_prompt', type=str, default='default',
+                                help='实体提取的 Prompt 模板路径')
         self.parser.add_argument('--entity_threshold', type=float, default=0.5,
                                 help='实体提取的置信度阈值')
         
-        # 关系提取相关参数
+        #  关系提取相关参数 
         self.parser.add_argument('--relation_model', type=str, default='default',
                                 help='关系提取使用的模型')
+        self.parser.add_argument('--relation_input_dir', type=str, required=True,
+                                help='关系提取的输入目录')
+        self.parser.add_argument('--relation_output_dir', type=str, required=True,
+                                help='关系提取的输出目录')
+        self.parser.add_argument('--relation_prompt', type=str, default='default',
+                                help='关系提取的 Prompt 模板路径')
         self.parser.add_argument('--relation_threshold', type=float, default=0.5,
                                 help='关系提取的置信度阈值')
         
@@ -95,39 +107,83 @@ class MainCLI(CLI):
     
     def _run_entity_extraction(self, args):
         """
-        执行实体提取任务
-        
-        Args:
-            args: 命令行参数
+        执行实体提取任务（目录模式）
         """
         logging.info("开始实体提取任务")
+        
+        input_dir = Path(args.entity_input_dir)
+        output_dir = Path(args.entity_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         extractor = EntityExtractor(
             model_name=args.entity_model,
-            threshold=args.entity_threshold
+            threshold=args.entity_threshold     
         )
-        extractor.extract(
-            data_dir=args.data_dir,
-            output_dir=args.output_dir
-        )
-        logging.info("实体提取任务完成")
+        
+        input_files = sorted(input_dir.glob("*.json"))
+        total_articles = 0
+        
+        for idx, input_file in enumerate(input_files):
+            if idx < args.start_index:
+                continue
+            if args.end_index >= 0 and idx > args.end_index:
+                break
+            
+            output_file = output_dir / (input_file.stem + ".jsonl")
+            
+            if args.resume and output_file.exists():
+                logging.info(f"跳过（已存在）: {output_file.name}")
+                continue
+            
+            logging.info(f"处理: {input_file.name} -> {output_file.name}")
+            count = extractor.extract_batch_to_jsonl(
+                input_file=input_file,
+                output_file=output_file,
+                prompt_path=Path(args.entity_prompt)
+            )
+            total_articles += count
+        
+        logging.info(f"实体提取完成，共处理 {total_articles} 篇文章")
     
     def _run_relation_extraction(self, args):
         """
-        执行关系提取任务
-        
-        Args:
-            args: 命令行参数
+        执行关系提取任务（目录模式）
         """
         logging.info("开始关系提取任务")
+        
+        input_dir = Path(args.relation_input_dir)
+        output_dir = Path(args.relation_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         extractor = RelationExtractor(
             model_name=args.relation_model,
             threshold=args.relation_threshold
         )
-        extractor.extract(
-            data_dir=args.data_dir,
-            output_dir=args.output_dir
-        )
-        logging.info("关系提取任务完成")
+        
+        input_files = sorted(input_dir.glob("*.jsonl"))
+        total_articles = 0
+        
+        for idx, input_file in enumerate(input_files):
+            if idx < args.start_index:
+                continue
+            if args.end_index >= 0 and idx > args.end_index:
+                break
+            
+            output_file = output_dir / (input_file.stem + ".jsonl")
+            
+            if args.resume and output_file.exists():
+                logging.info(f"跳过（已存在）: {output_file.name}")
+                continue
+            
+            logging.info(f"处理: {input_file.name} -> {output_file.name}")
+            count = extractor.extract_relations_from_jsonl(
+                input_file=input_file,
+                output_file=output_file,
+                prompt_path=Path(args.relation_prompt)
+            )
+            total_articles += count
+        
+        logging.info(f"关系提取完成，共处理 {total_articles} 篇文章")
     
     def _ensure_progress_file_exists(self, progress_file: str):
         """确保进度文件存在且格式正确"""
