@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 from typing import Union, Dict, Any, List
-from project.llm import LLM
+from LLM import LLM
 
 
 class RelationExtractor:

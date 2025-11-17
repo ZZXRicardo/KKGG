@@ -9,7 +9,7 @@
 import logging
 import json
 from pathlib import Path
-from project.llm import LLM 
+from LLM import LLM
 
 
 class EntityExtractor:
