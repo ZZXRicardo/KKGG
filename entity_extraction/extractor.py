@@ -78,26 +78,33 @@ class EntityExtractor:
                 if not isinstance(record, dict):
                     self.logger.warning(f"跳过非字典项（索引 {idx}）")
                     continue
-
-                name = record.get("name", f"unnamed_{idx}")
+            
+                # 兼容 name / title，并确保有值
+                name = record.get("name") or record.get("title") or f"unnamed_{idx}"
+            
                 content = record.get("content", "")
                 if not content or (isinstance(content, str) and not content.strip()):
                     self.logger.warning(f"记录 {name} 内容为空，跳过")
                     continue
-
-                # 标准化 content
+            
+                # 标准化 content：过滤空值和 "---"
                 if isinstance(content, list):
-                    content_str = " ".join(str(x) for x in content if x)
+                    content_str = " ".join(
+                        str(x) for x in content 
+                        if x is not None and str(x).strip() and str(x).strip() != "---"
+                    )
                 else:
-                    content_str = str(content)
-
+                    content_str = str(content).strip()
+            
+                if not content_str:
+                    self.logger.warning(f"记录 {name} 标准化后内容为空，跳过")
+                    continue
+            
                 full_input = {
-                    "name": record.get("name"),
-                    "address": record.get("address"),
-                    "category": record.get("category"),
+                    "name": name,
                     "content": content_str
                 }
-
+            
                 user_input = json.dumps(full_input, ensure_ascii=False, indent=2)
                 full_prompt = f"{system_prompt}\n\n---\n\n{user_input}"
 
