@@ -11,6 +11,7 @@ import argparse
 import logging
 import os
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Set, Tuple
 from cli import CLI
@@ -36,11 +37,11 @@ class MainCLI(CLI):
         # 实体提取相关参数 
         self.parser.add_argument('--entity_model', type=str, default='default',
                                 help='实体提取使用的模型')
-        self.parser.add_argument('--entity_input_dir', type=str, required=True,
+        self.parser.add_argument('--entity_input_dir', type=str, required=False,
                                 help='实体提取的输入目录）')
-        self.parser.add_argument('--entity_output_dir', type=str, required=True,
+        self.parser.add_argument('--entity_output_dir', type=str, required=False,
                                 help='实体提取的输出目录')
-        self.parser.add_argument('--entity_prompt', type=str, required=True,
+        self.parser.add_argument('--entity_prompt', type=str, required=False,
                                 help='实体提取的 Prompt 模板路径')
         self.parser.add_argument('--entity_threshold', type=float, default=0.5,
                                 help='实体提取的置信度阈值')
@@ -48,11 +49,11 @@ class MainCLI(CLI):
         #  关系提取相关参数 
         self.parser.add_argument('--relation_model', type=str, default='default',
                                 help='关系提取使用的模型')
-        self.parser.add_argument('--relation_input_dir', type=str, required=True,
+        self.parser.add_argument('--relation_input_dir', type=str, required=False,
                                 help='关系提取的输入目录')
-        self.parser.add_argument('--relation_output_dir', type=str, required=True,
+        self.parser.add_argument('--relation_output_dir', type=str, required=False,
                                 help='关系提取的输出目录')
-        self.parser.add_argument('--relation_prompt', type=str, required=True,
+        self.parser.add_argument('--relation_prompt', type=str, required=False,
                                 help='关系提取的 Prompt 模板路径')
         self.parser.add_argument('--relation_threshold', type=float, default=0.5,
                                 help='关系提取的置信度阈值')
@@ -60,12 +61,24 @@ class MainCLI(CLI):
         # 实体消歧相关参数
         self.parser.add_argument('--disambiguation_method', type=str, default='default',
                                 help='实体消歧使用的方法')
+        self.parser.add_argument('--disambiguation_input_dir', type=str,
+                                default=r'E:\KKGG\output\KG\test',
+                                help='实体消歧的输入目录')
+        self.parser.add_argument('--disambiguation_output_dir', type=str,
+                                default=r'E:\KKGG\output\KG\test_削岐后',
+                                help='实体消歧的输出目录')
         self.parser.add_argument('--kb_path', type=str, default='',
                                 help='知识库路径，用于实体消歧')
         
         # 概念聚类相关参数
         self.parser.add_argument('--clustering_method', type=str, default='default',
                                 help='概念聚类使用的方法')
+        self.parser.add_argument('--clustering_input_dir', type=str,
+                                default=r'E:\KKGG\output\KG\test',
+                                help='概念聚类的输入目录')
+        self.parser.add_argument('--cluster_output_file', type=str,
+                                default=r'E:\KKGG\output\terms\test_entity_cluster_triples.json',
+                                help='聚类输出文件路径')
         self.parser.add_argument('--cluster_num', type=int, default=-1,
                                 help='聚类数量，-1表示自动确定')
         
@@ -79,7 +92,11 @@ class MainCLI(CLI):
         self.parser.add_argument('--progress_file', type=str, 
                                 default=r'E:\KKGG\project\process.json',
                                 help='进度文件路径')
-    
+        self.parser.add_argument('--terms_base_dir', type=str,
+                                default=r'E:\KKGG\output\terms',
+                                help='术语库基础目录路径（默认可用）')
+        self.parser.add_argument('--no_pid', action='store_true',
+                                help='禁用PID命名，使用默认文件名')    
     def run(self, args):
         """
         执行选定的任务
@@ -105,6 +122,46 @@ class MainCLI(CLI):
         
         logging.info(f"任务 {args.task} 执行完成")
     
+    def _extract_file_index(self, filename):
+        """
+        从文件名中提取索引数字
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            int: 文件索引，如果无法提取则返回-1
+        """
+        # 匹配文件名开头的数字部分，例如 "00003_中国大陆银行列表.json" -> 3
+        match = re.match(r'^(\d+)', filename.stem)
+        if match:
+            return int(match.group(1))
+        return -1
+    
+    def _get_sorted_files(self, input_dir):
+        """
+        获取按索引排序的文件列表
+        
+        Args:
+            input_dir: 输入目录
+            
+        Returns:
+            list: 按索引排序的文件路径列表
+        """
+        input_files = list(input_dir.glob("*.json"))
+        
+        # 提取文件索引并排序
+        files_with_index = []
+        for file_path in input_files:
+            index = self._extract_file_index(file_path)
+            files_with_index.append((index, file_path))
+        
+        # 按索引排序
+        files_with_index.sort(key=lambda x: x[0])
+        
+        # 返回排序后的文件路径
+        return [file_path for _, file_path in files_with_index]
+    
     def _run_entity_extraction(self, args):
         logging.info("开始实体提取任务")
 
@@ -117,6 +174,7 @@ class MainCLI(CLI):
             threshold=args.entity_threshold
         )
 
+        # 保持原有的文件处理方式，不修改
         input_files = sorted(input_dir.glob("*.json"))
         total_articles = 0
 
@@ -136,7 +194,7 @@ class MainCLI(CLI):
             result = extractor.extract(
                 input_file=input_file,
                 output_file=output_file,
-                prompt_path=args.entity_prompt  # ← 字符串路径，与 testcli 一致
+                prompt_path=args.entity_prompt
             )
             total_articles += result.get("processed", 0)
 
@@ -154,6 +212,7 @@ class MainCLI(CLI):
             threshold=args.relation_threshold
         )
 
+        # 保持原有的文件处理方式，不修改
         input_files = sorted(input_dir.glob("*.jsonl"))
         total_articles = 0
 
@@ -173,7 +232,7 @@ class MainCLI(CLI):
             result = extractor.extract(
                 input_file=input_file,
                 output_file=output_file,
-                prompt_path=args.relation_prompt  # ← 字符串路径，与 testcli 一致
+                prompt_path=args.relation_prompt
             )
             total_articles += result.get("successful_records", 0)
 
@@ -249,424 +308,456 @@ class MainCLI(CLI):
     
     def _run_entity_disambiguation(self, args):
         """
-        执行实体消歧任务 - 按文章逐个处理
+        执行实体消歧任务 - 处理目录内的JSON文件
         
         Args:
             args: 命令行参数
         """
-        logging.info("开始实体消歧任务（按文章逐个处理）")
+        logging.info("开始实体消歧任务（处理目录内文件）")
         
         # 定义输入输出路径
-        input_json_path = r"E:\KKGG\output\KG\输出.json"
-        output_json_path = r"E:\KKGG\output\KG\输出_消歧后.json"
+        input_dir = Path(args.disambiguation_input_dir)
+        output_dir = Path(args.disambiguation_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         progress_file = args.progress_file
         task_name = "entity_disambiguation"
         
-        # ✅ 修复：检查输入文件是否存在
-        if not os.path.exists(input_json_path):
-            logging.error(f"输入文件不存在: {input_json_path}")
-            # 创建初始进度并保存
-            progress = {
-                "task": task_name,
-                "processed_indices": [],
-                "current_index": 0
-            }
-            self._save_progress(progress_file, progress)
+        # 确定是否使用PID
+        pid = None if args.no_pid else os.getpid()
+        
+        # 创建消歧器时传递新参数（仅修改这一行）
+        disambiguator = TermDisambiguator(
+            api_provider="qianwen",
+            base_terms_dir=args.terms_base_dir,
+            process_id=pid
+        )
+        
+        # 获取按索引排序的输入文件
+        input_files = self._get_sorted_files(input_dir)
+        if not input_files:
+            logging.warning(f"输入目录中没有找到JSON文件: {input_dir}")
             return
         
-        # 读取JSON数据
-        try:
-            with open(input_json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            logging.info(f"成功读取输入文件: {input_json_path}, 共 {len(data)} 篇文章")
-        except Exception as e:
-            logging.error(f"读取输入文件失败: {e}")
-            # ✅ 修复：即使读取失败也保存进度
-            progress = {
-                "task": task_name,
-                "processed_indices": [],
-                "current_index": 0
-            }
-            self._save_progress(progress_file, progress)
-            return
+        logging.info(f"找到 {len(input_files)} 个输入文件")
         
         # 加载进度
         progress = self._load_progress(progress_file, task_name)
+        
+        # 计算实际开始和结束索引
         if args.resume:
-            start_index = progress.get("current_index", args.start_index)
+            # 从进度恢复，找到第一个未处理的文件
+            processed_files = set(progress.get("processed_files", []))
+            start_index = 0
+            # 找到第一个未处理的文件
+            for i, file_path in enumerate(input_files):
+                if file_path.name not in processed_files:
+                    start_index = i
+                    break
+            else:
+                # 所有文件都已处理
+                start_index = len(input_files)
             logging.info(f"从进度恢复，开始索引: {start_index}")
         else:
-            start_index = args.start_index
-            progress = {
-                "task": task_name,
-                "processed_indices": [],
-                "current_index": start_index
-            }
-            # ✅ 修复：立即保存初始进度
-            self._save_progress(progress_file, progress)
+            # 从头开始，找到第一个符合start_index的文件
+            start_index = 0
+            for i, file_path in enumerate(input_files):
+                file_index = self._extract_file_index(file_path)
+                if file_index >= args.start_index:
+                    start_index = i
+                    break
         
-        end_index = args.end_index if args.end_index != -1 else len(data) - 1
-        
-        logging.info(f"处理范围: 索引 {start_index} 到 {end_index}")
-        
-        # ✅ 修复：检查数据是否为空
-        if not data:
-            logging.warning("输入数据为空，跳过处理")
-            return
-        
-        # 初始化输出数据
-        if os.path.exists(output_json_path):
-            try:
-                with open(output_json_path, 'r', encoding='utf-8') as f:
-                    output_data = json.load(f)
-                logging.info(f"加载现有输出文件: {output_json_path}")
-            except Exception as e:
-                logging.warning(f"读取输出文件失败，创建新文件: {e}")
-                output_data = []
+        # 计算结束索引
+        if args.end_index >= 0:
+            end_index = -1
+            for i, file_path in enumerate(input_files):
+                file_index = self._extract_file_index(file_path)
+                if file_index > args.end_index:
+                    end_index = i - 1
+                    break
+            else:
+                end_index = len(input_files) - 1
         else:
-            output_data = []
+            end_index = len(input_files) - 1
         
-        # 确保输出数据长度与输入一致
-        while len(output_data) < len(data):
-            output_data.append(None)
-        
-        # ✅ 修复：在处理循环开始前保存进度
+        # 初始化进度
+        progress.update({
+            "task": task_name,
+            "total_files": len(input_files),
+            "current_index": start_index
+        })
         self._save_progress(progress_file, progress)
         
-        # 逐个文章处理
+        logging.info(f"处理范围: 文件索引 {start_index} 到 {end_index} (共 {end_index - start_index + 1} 个文件)")
+        
+        # 逐个文件处理
+        processed_count = 0
         for idx in range(start_index, end_index + 1):
-            if idx >= len(data):
-                logging.warning(f"索引 {idx} 超出数据范围，跳过")
+            if idx >= len(input_files):
+                logging.warning(f"索引 {idx} 超出文件范围，跳过")
                 continue
                 
-            article = data[idx]
-            article_name = article.get('name', f'文章_{idx}')
-            article_url = article.get('metadata', {}).get('url', '未知URL')
+            input_file = input_files[idx]
+            output_file = output_dir / input_file.name
+            file_index = self._extract_file_index(input_file)
+            
+            # 检查文件是否已处理
+            if args.resume and input_file.name in progress.get("processed_files", []):
+                logging.info(f"跳过（已处理）: {input_file.name}")
+                continue
             
             logging.info(f"\n{'='*60}")
-            logging.info(f"处理第 {idx} 篇文章: {article_name}")
-            logging.info(f"URL: {article_url}")
+            logging.info(f"处理第 {idx}/{len(input_files)} 个文件 (索引{file_index}): {input_file.name}")
+            logging.info(f"输出文件: {output_file.name}")
             logging.info(f"{'='*60}")
             
-            # 更新进度
-            progress["current_index"] = idx
-            if idx not in progress["processed_indices"]:
-                progress["processed_indices"].append(idx)
-            
-            # ✅ 修复：立即保存进度，无论处理结果如何
-            self._save_progress(progress_file, progress)
-            
-            # 收集当前文章的实体和关系
-            entity_a_terms = set()
-            relation_terms = set()
-            entity_context_parts = []
-            relation_context_parts = []
-            
-            # 使用文章全文内容作为上下文
-            article_content = article.get('content', '')
-            
-            # 遍历当前文章的所有结果
-            for result in article.get('results', []):
-                if 'output' not in result:
-                    continue
+            # 处理单个文件
+            try:
+                # 读取输入文件
+                with open(input_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
                 
-                output = result['output']
+                logging.info(f"成功读取文件: {input_file}, 共 {len(data)} 篇文章")
                 
-                # 从relations数组中提取
-                if 'relations' in output:
-                    for rel in output['relations']:
-                        if not isinstance(rel, dict):
+                # 初始化输出数据（与输入结构相同）
+                output_data = []
+                
+                # 逐个文章处理
+                for article_idx, article in enumerate(data):
+                    article_name = article.get('name', f'文章_{article_idx}')
+                    
+                    logging.info(f"处理文章 {article_idx}: {article_name}")
+                    
+                    # 收集当前文章的实体和关系
+                    entity_a_terms = set()
+                    relation_terms = set()
+                    entity_context_parts = []
+                    relation_context_parts = []
+                    
+                    # 使用文章全文内容作为上下文
+                    article_content = article.get('content', '')
+                    
+                    # 遍历当前文章的所有结果
+                    for result in article.get('results', []):
+                        if 'output' not in result:
                             continue
                         
-                        triple = rel.get('triple', [])
-                        labels = rel.get('label', [])
+                        output = result['output']
                         
-                        if len(triple) >= 3 and len(labels) >= 2:
-                            head = triple[0]
-                            relation = triple[1]
-                            tail = triple[2]
-                            head_label = labels[0]
-                            tail_label = labels[1]
-                            
-                            # 收集label='a'的实体
-                            if head_label and str(head_label).lower() == 'a' and head:
-                                entity_a_terms.add(head)
-                                entity_context_parts.append(f"{head} {relation} {tail}")
-                            
-                            if tail_label and str(tail_label).lower() == 'a' and tail:
-                                entity_a_terms.add(tail)
-                                entity_context_parts.append(f"{head} {relation} {tail}")
-                            
-                            # 收集所有关系词
-                            if relation:
-                                relation_terms.add(relation)
-                            
-                            relation_context_parts.append(f"{head} {relation} {tail}")
-            
-            # 转换为列表
-            entity_a_list = sorted(list(entity_a_terms))
-            relation_list = sorted(list(relation_terms))
-            
-            logging.info(f"收集到 {len(entity_a_list)} 个label='a'的实体")
-            logging.info(f"收集到 {len(relation_list)} 个关系词")
-            logging.info(f"实体: {entity_a_list}")
-            logging.info(f"关系: {relation_list}")
-            
-            if not entity_a_list and not relation_list:
-                logging.info(f"文章 {idx} 没有需要消歧的实体和关系，跳过")
-                # 保存原始数据到输出
-                output_data[idx] = article
-                
-                # 增量保存输出文件
-                try:
-                    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
-                    current_output = [item if item is not None else data[i] for i, item in enumerate(output_data)]
-                    with open(output_json_path, 'w', encoding='utf-8') as f:
-                        json.dump(current_output, f, ensure_ascii=False, indent=2)
-                    logging.info(f"增量保存: {output_json_path}")
-                except Exception as e:
-                    logging.error(f"保存输出文件失败: {e}")
-                
-                continue
-            
-            # 使用文章全文作为主要上下文，三元组作为补充
-            entity_shared_context = article_content + " " + " ".join(entity_context_parts[:50])
-            relation_shared_context = article_content + " " + " ".join(relation_context_parts[:50])
-            
-            # 初始化消歧器并执行消歧
-            disambiguator = TermDisambiguator(api_provider="qianwen")
-            
-            try:
-                updated_entities, updated_relations = disambiguator.Disambiguate(
-                    entity_terms=entity_a_list,
-                    relation_terms=relation_list,
-                    entity_shared_context=entity_shared_context,
-                    relation_shared_context=relation_shared_context
-                )
-                
-                logging.info(f"消歧完成 - 更新后实体数: {len(updated_entities)}, 关系数: {len(updated_relations)}")
-                
-            except Exception as e:
-                logging.error(f"文章 {idx} 消歧过程出错: {e}")
-                import traceback
-                logging.error(traceback.format_exc())
-                # 出错时保存原始数据
-                output_data[idx] = article
-                
-                # 增量保存输出文件
-                try:
-                    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
-                    current_output = [item if item is not None else data[i] for i, item in enumerate(output_data)]
-                    with open(output_json_path, 'w', encoding='utf-8') as f:
-                        json.dump(current_output, f, ensure_ascii=False, indent=2)
-                    logging.info(f"增量保存: {output_json_path}")
-                except Exception as e:
-                    logging.error(f"保存输出文件失败: {e}")
-                
-                continue
-            
-            # 创建映射字典
-            entity_mapping = dict(zip(entity_a_list, updated_entities))
-            relation_mapping = dict(zip(relation_list, updated_relations))
-            
-            logging.info(f"实体映射: {entity_mapping}")
-            logging.info(f"关系映射: {relation_mapping}")
-            
-            # 复制文章数据并更新三元组
-            updated_article = json.loads(json.dumps(article))  # 深拷贝
-            
-            # 更新当前文章的三元组
-            updated_count = 0
-            for result in updated_article.get('results', []):
-                if 'output' not in result or 'relations' not in result['output']:
-                    continue
-                
-                relations = result['output']['relations']
-                for rel in relations:
-                    if not isinstance(rel, dict) or 'triple' not in rel:
+                        # 从relations数组中提取
+                        if 'relations' in output:
+                            for rel in output['relations']:
+                                if not isinstance(rel, dict):
+                                    continue
+                                
+                                triple = rel.get('triple', [])
+                                labels = rel.get('label', [])
+                                
+                                if len(triple) >= 3 and len(labels) >= 2:
+                                    head = triple[0]
+                                    relation = triple[1]
+                                    tail = triple[2]
+                                    head_label = labels[0]
+                                    tail_label = labels[1]
+                                    
+                                    # 收集label='a'的实体
+                                    if head_label and str(head_label).lower() == 'a' and head:
+                                        entity_a_terms.add(head)
+                                        entity_context_parts.append(f"{head} {relation} {tail}")
+                                    
+                                    if tail_label and str(tail_label).lower() == 'a' and tail:
+                                        entity_a_terms.add(tail)
+                                        entity_context_parts.append(f"{head} {relation} {tail}")
+                                    
+                                    # 收集所有关系词
+                                    if relation:
+                                        relation_terms.add(relation)
+                                    
+                                    relation_context_parts.append(f"{head} {relation} {tail}")
+                    
+                    # 转换为列表
+                    entity_a_list = sorted(list(entity_a_terms))
+                    relation_list = sorted(list(relation_terms))
+                    
+                    logging.info(f"收集到 {len(entity_a_list)} 个label='a'的实体")
+                    logging.info(f"收集到 {len(relation_list)} 个关系词")
+                    
+                    if not entity_a_list and not relation_list:
+                        logging.info(f"文章 {article_idx} 没有需要消歧的实体和关系，保持原样")
+                        output_data.append(article)
                         continue
                     
-                    triple = rel['triple']
-                    if len(triple) >= 3:
-                        head, relation, tail = triple[0], triple[1], triple[2]
+                    # 使用文章全文作为主要上下文，三元组作为补充
+                    entity_shared_context = article_content + " " + " ".join(entity_context_parts[:50])
+                    relation_shared_context = article_content + " " + " ".join(relation_context_parts[:50])
+                    
+                    
+                    try:
+                        updated_entities, updated_relations = disambiguator.Disambiguate(
+                            entity_terms=entity_a_list,
+                            relation_terms=relation_list,
+                            entity_shared_context=entity_shared_context,
+                            relation_shared_context=relation_shared_context
+                        )
                         
-                        # 更新术语
-                        if head in entity_mapping and entity_mapping[head] != head:
-                            rel['triple'][0] = entity_mapping[head]
-                            updated_count += 1
+                        logging.info(f"消歧完成 - 更新后实体数: {len(updated_entities)}, 关系数: {len(updated_relations)}")
                         
-                        if relation in relation_mapping and relation_mapping[relation] != relation:
-                            rel['triple'][1] = relation_mapping[relation]
-                            updated_count += 1
+                    except Exception as e:
+                        logging.error(f"文章 {article_idx} 消歧过程出错: {e}")
+                        # 出错时保存原始数据
+                        output_data.append(article)
+                        continue
+                    
+                    # 创建映射字典
+                    entity_mapping = dict(zip(entity_a_list, updated_entities))
+                    relation_mapping = dict(zip(relation_list, updated_relations))
+                    
+                    logging.info(f"实体映射: {len(entity_mapping)} 个")
+                    logging.info(f"关系映射: {len(relation_mapping)} 个")
+                    
+                    # 复制文章数据并更新三元组
+                    updated_article = json.loads(json.dumps(article))  # 深拷贝
+                    
+                    # 更新当前文章的三元组
+                    updated_count = 0
+                    for result in updated_article.get('results', []):
+                        if 'output' not in result or 'relations' not in result['output']:
+                            continue
                         
-                        if tail in entity_mapping and entity_mapping[tail] != tail:
-                            rel['triple'][2] = entity_mapping[tail]
-                            updated_count += 1
-            
-            # 保存更新后的文章
-            output_data[idx] = updated_article
-            logging.info(f"文章 {idx} 更新完成，共更新 {updated_count} 个术语")
-            
-            # 增量保存输出文件
-            try:
-                os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
-                current_output = [item if item is not None else data[i] for i, item in enumerate(output_data)]
-                with open(output_json_path, 'w', encoding='utf-8') as f:
-                    json.dump(current_output, f, ensure_ascii=False, indent=2)
-                logging.info(f"增量保存: {output_json_path}")
+                        relations = result['output']['relations']
+                        for rel in relations:
+                            if not isinstance(rel, dict) or 'triple' not in rel:
+                                continue
+                            
+                            triple = rel['triple']
+                            if len(triple) >= 3:
+                                head, relation, tail = triple[0], triple[1], triple[2]
+                                
+                                # 更新术语
+                                if head in entity_mapping and entity_mapping[head] != head:
+                                    rel['triple'][0] = entity_mapping[head]
+                                    updated_count += 1
+                                
+                                if relation in relation_mapping and relation_mapping[relation] != relation:
+                                    rel['triple'][1] = relation_mapping[relation]
+                                    updated_count += 1
+                                
+                                if tail in entity_mapping and entity_mapping[tail] != tail:
+                                    rel['triple'][2] = entity_mapping[tail]
+                                    updated_count += 1
+                    
+                    # 保存更新后的文章
+                    output_data.append(updated_article)
+                    logging.info(f"文章 {article_idx} 更新完成，共更新 {updated_count} 个术语")
+                
+                # 保存输出文件
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(output_data, f, ensure_ascii=False, indent=2)
+                logging.info(f"输出文件保存: {output_file}")
+                
+                # 更新进度
+                processed_files = progress.get("processed_files", [])
+                if input_file.name not in processed_files:
+                    processed_files.append(input_file.name)
+                progress.update({
+                    "processed_files": processed_files,
+                    "current_index": idx + 1,  # 下一个要处理的文件索引
+                    "processed_count": len(processed_files)
+                })
+                self._save_progress(progress_file, progress)
+                
+                processed_count += 1
+                logging.info(f"文件处理完成: {input_file.name} (进度: {idx + 1}/{len(input_files)})")
+                
             except Exception as e:
-                logging.error(f"保存输出文件失败: {e}")
+                logging.error(f"处理文件失败 {input_file.name}: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+                continue
         
-        logging.info("实体消歧任务完成")
+        logging.info(f"实体消歧任务完成，共处理 {processed_count} 个文件")
         logging.info(f"进度文件: {progress_file}")
-        logging.info(f"输出文件: {output_json_path}")
-    
+        logging.info(f"输出目录: {output_dir}")
     def _run_concept_clustering(self, args):
         """
-        执行局部概念聚类任务 - 按文章逐个处理
+        执行局部概念聚类任务 - 处理目录内的JSON文件
         
         Args:
             args: 命令行参数
         """
-        logging.info("开始局部概念聚类任务（按文章逐个处理）")
+        logging.info("开始局部概念聚类任务（处理目录内文件）")
         
         # 定义输入路径
-        input_json_path = r"E:\KKGG\output\KG\输出.json"
+        input_dir = Path(args.clustering_input_dir)
+        cluster_output_file = Path(args.cluster_output_file)
         progress_file = args.progress_file
         task_name = "concept_clustering"
         
-        # ✅ 修复：检查输入文件是否存在
-        if not os.path.exists(input_json_path):
-            logging.error(f"输入文件不存在: {input_json_path}")
-            # 创建初始进度并保存
-            progress = {
-                "task": task_name,
-                "processed_indices": [],
-                "current_index": 0
-            }
-            self._save_progress(progress_file, progress)
+        # 确定是否使用PID
+        pid = None if args.no_pid else os.getpid()
+        
+        # 创建聚类器时传递新参数（仅修改这一行）
+        clusterer = TermDisambiguator(
+            api_provider="qianwen",
+            base_terms_dir=args.terms_base_dir,
+            process_id=pid
+        )
+        
+        # 获取按索引排序的输入文件
+        input_files = self._get_sorted_files(input_dir)
+        if not input_files:
+            logging.warning(f"输入目录中没有找到JSON文件: {input_dir}")
             return
         
-        # 读取JSON数据
-        try:
-            with open(input_json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            logging.info(f"成功读取输入文件: {input_json_path}, 共 {len(data)} 篇文章")
-        except Exception as e:
-            logging.error(f"读取输入文件失败: {e}")
-            # ✅ 修复：即使读取失败也保存进度
-            progress = {
-                "task": task_name,
-                "processed_indices": [],
-                "current_index": 0
-            }
-            self._save_progress(progress_file, progress)
-            return
+        logging.info(f"找到 {len(input_files)} 个输入文件")
         
         # 加载进度
         progress = self._load_progress(progress_file, task_name)
+        
+        # 计算实际开始和结束索引
         if args.resume:
-            start_index = progress.get("current_index", args.start_index)
+            # 从进度恢复，找到第一个未处理的文件
+            processed_files = set(progress.get("processed_files", []))
+            start_index = 0
+            # 找到第一个未处理的文件
+            for i, file_path in enumerate(input_files):
+                if file_path.name not in processed_files:
+                    start_index = i
+                    break
+            else:
+                # 所有文件都已处理
+                start_index = len(input_files)
             logging.info(f"从进度恢复，开始索引: {start_index}")
         else:
-            start_index = args.start_index
-            progress = {
-                "task": task_name,
-                "processed_indices": [],
-                "current_index": start_index
-            }
-            # ✅ 修复：立即保存初始进度
-            self._save_progress(progress_file, progress)
+            # 从头开始，找到第一个符合start_index的文件
+            start_index = 0
+            for i, file_path in enumerate(input_files):
+                file_index = self._extract_file_index(file_path)
+                if file_index >= args.start_index:
+                    start_index = i
+                    break
         
-        end_index = args.end_index if args.end_index != -1 else len(data) - 1
+        # 计算结束索引
+        if args.end_index >= 0:
+            end_index = -1
+            for i, file_path in enumerate(input_files):
+                file_index = self._extract_file_index(file_path)
+                if file_index > args.end_index:
+                    end_index = i - 1
+                    break
+            else:
+                end_index = len(input_files) - 1
+        else:
+            end_index = len(input_files) - 1
         
-        logging.info(f"处理范围: 索引 {start_index} 到 {end_index}")
-        
-        # ✅ 修复：检查数据是否为空
-        if not data:
-            logging.warning("输入数据为空，跳过处理")
-            return
-        
-        # ✅ 修复：在处理循环开始前保存进度
+        # 初始化进度
+        progress.update({
+            "task": task_name,
+            "total_files": len(input_files),
+            "current_index": start_index
+        })
         self._save_progress(progress_file, progress)
         
-        # 逐个文章处理
+        logging.info(f"处理范围: 文件索引 {start_index} 到 {end_index} (共 {end_index - start_index + 1} 个文件)")
+        
+        # 收集所有文件的label='b'的实体
+        all_entity_b_terms = set()
+        all_context_parts = []
+        processed_count = 0
+        
+        # 逐个文件处理，收集实体
         for idx in range(start_index, end_index + 1):
-            if idx >= len(data):
-                logging.warning(f"索引 {idx} 超出数据范围，跳过")
+            if idx >= len(input_files):
+                logging.warning(f"索引 {idx} 超出文件范围，跳过")
                 continue
                 
-            article = data[idx]
-            article_name = article.get('name', f'文章_{idx}')
-            article_url = article.get('metadata', {}).get('url', '未知URL')
+            input_file = input_files[idx]
+            file_index = self._extract_file_index(input_file)
+            
+            # 检查文件是否已处理
+            if args.resume and input_file.name in progress.get("processed_files", []):
+                logging.info(f"跳过（已处理）: {input_file.name}")
+                continue
             
             logging.info(f"\n{'='*60}")
-            logging.info(f"处理第 {idx} 篇文章: {article_name}")
-            logging.info(f"URL: {article_url}")
+            logging.info(f"处理第 {idx}/{len(input_files)} 个文件 (索引{file_index}): {input_file.name}")
             logging.info(f"{'='*60}")
             
-            # 更新进度
-            progress["current_index"] = idx
-            if idx not in progress["processed_indices"]:
-                progress["processed_indices"].append(idx)
-            
-            # ✅ 修复：立即保存进度，无论处理结果如何
-            self._save_progress(progress_file, progress)
-            
-            # 收集当前文章的label='b'的实体
-            entity_b_terms = set()
-            context_parts = []
-            
-            # 使用文章全文内容作为上下文
-            article_content = article.get('content', '')
-            
-            # 遍历当前文章的所有结果
-            for result in article.get('results', []):
-                if 'output' not in result:
-                    continue
+            # 从文件中收集实体
+            try:
+                # 读取文件
+                with open(input_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
                 
-                output = result['output']
+                entity_b_terms = set()
+                context_parts = []
                 
-                # 从relations数组中提取
-                if 'relations' in output:
-                    for rel in output['relations']:
-                        if not isinstance(rel, dict):
+                # 遍历所有文章
+                for article in data:
+                    article_content = article.get('content', '')
+                    
+                    # 遍历当前文章的所有结果
+                    for result in article.get('results', []):
+                        if 'output' not in result:
                             continue
                         
-                        triple = rel.get('triple', [])
-                        labels = rel.get('label', [])
+                        output = result['output']
                         
-                        if len(triple) >= 3 and len(labels) >= 2:
-                            head = triple[0]
-                            relation = triple[1]
-                            tail = triple[2]
-                            head_label = labels[0]
-                            tail_label = labels[1]
-                            
-                            # 收集label='b'的实体
-                            if head_label and str(head_label).lower() == 'b' and head:
-                                entity_b_terms.add(head)
-                                context_parts.append(f"{head} {relation} {tail}")
-                            
-                            if tail_label and str(tail_label).lower() == 'b' and tail:
-                                entity_b_terms.add(tail)
-                                context_parts.append(f"{head} {relation} {tail}")
-            
-            # 转换为列表
-            entity_b_list = sorted(list(entity_b_terms))
-            
-            logging.info(f"收集到 {len(entity_b_list)} 个label='b'的实体")
-            logging.info(f"实体: {entity_b_list}")
-            
-            if not entity_b_list:
-                logging.info(f"文章 {idx} 没有需要聚类的实体，跳过")
+                        # 从relations数组中提取
+                        if 'relations' in output:
+                            for rel in output['relations']:
+                                if not isinstance(rel, dict):
+                                    continue
+                                
+                                triple = rel.get('triple', [])
+                                labels = rel.get('label', [])
+                                
+                                if len(triple) >= 3 and len(labels) >= 2:
+                                    head = triple[0]
+                                    relation = triple[1]
+                                    tail = triple[2]
+                                    head_label = labels[0]
+                                    tail_label = labels[1]
+                                    
+                                    # 收集label='b'的实体
+                                    if head_label and str(head_label).lower() == 'b' and head:
+                                        entity_b_terms.add(head)
+                                        context_parts.append(f"{head} {relation} {tail}")
+                                    
+                                    if tail_label and str(tail_label).lower() == 'b' and tail:
+                                        entity_b_terms.add(tail)
+                                        context_parts.append(f"{head} {relation} {tail}")
+                
+                all_entity_b_terms.update(entity_b_terms)
+                all_context_parts.extend(context_parts)
+                
+                # 更新进度
+                processed_files = progress.get("processed_files", [])
+                if input_file.name not in processed_files:
+                    processed_files.append(input_file.name)
+                progress.update({
+                    "processed_files": processed_files,
+                    "current_index": idx + 1,  # 下一个要处理的文件索引
+                    "processed_count": len(processed_files)
+                })
+                self._save_progress(progress_file, progress)
+                
+                processed_count += 1
+                logging.info(f"文件处理完成: {input_file.name}, 收集到 {len(entity_b_terms)} 个实体 (进度: {idx + 1}/{len(input_files)})")
+                
+            except Exception as e:
+                logging.error(f"处理文件失败 {input_file.name}: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
                 continue
+        
+        # 执行概念聚类
+        if all_entity_b_terms:
+            entity_b_list = sorted(list(all_entity_b_terms))
+            logging.info(f"总共收集到 {len(entity_b_list)} 个label='b'的实体")
             
-            # 使用文章全文作为主要上下文，三元组作为补充
-            shared_context = article_content + " " + " ".join(context_parts[:100])
-            
-            # 初始化聚类器并执行聚类
-            clusterer = TermDisambiguator(api_provider="qianwen")
+            # 合并所有上下文
+            shared_context = " ".join(all_context_parts[:200])  # 限制上下文长度
+
             
             try:
                 cluster_result = clusterer.clusterer(
@@ -674,22 +765,19 @@ class MainCLI(CLI):
                     shared_context=shared_context
                 )
                 
-                logging.info(f"文章 {idx} 聚类完成")
+                logging.info(f"概念聚类完成")
                 logging.info(f"聚类结果包含 {len(cluster_result)} 个术语的三元组信息")
+                logging.info(f"输出文件: {cluster_output_file}")
                 
-                # 记录部分聚类结果
-                for i, (term, triples) in enumerate(list(cluster_result.items())[:3]):
-                    logging.info(f"术语 '{term}' 的三元组数量: {len(triples)}")
-                    
             except Exception as e:
-                logging.error(f"文章 {idx} 聚类过程出错: {e}")
+                logging.error(f"聚类过程出错: {e}")
                 import traceback
                 logging.error(traceback.format_exc())
-                continue
+        else:
+            logging.info("没有收集到需要聚类的实体")
         
-        logging.info("局部概念聚类任务完成")
+        logging.info(f"局部概念聚类任务完成，共处理 {processed_count} 个文件")
         logging.info(f"进度文件: {progress_file}")
-
 
 if __name__ == "__main__":
     cli = MainCLI()

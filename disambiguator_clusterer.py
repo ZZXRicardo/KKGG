@@ -25,20 +25,81 @@ class TermDisambiguator:
         embedding: List[float] = field(default_factory=list)
         synonyms: List[str] = field(default_factory=list)
     
-    def __init__(self, api_provider: str = "qianwen"):
+class TermDisambiguator:
+    """术语消歧与聚类系统 - 批量优化版"""
+    
+    # =========================================================
+    # 内部数据容器类（保持原嵌套结构）
+    # =========================================================
+    @dataclass
+    class TermEntry:
+        term: str = ""
+        explanation: str = ""
+        embedding: List[float] = field(default_factory=list)
+        synonyms: List[str] = field(default_factory=list)
+    
+    # =========================================================
+    # 修改初始化方法（仅增加参数和属性）
+    # =========================================================
+    def __init__(self, api_provider: str = "qianwen", base_terms_dir: Optional[str] = None, process_id: Optional[int] = None):
         """
         初始化消歧器
         
         Args:
             api_provider: API提供商，默认为"qianwen"
+            base_terms_dir: 术语库基础目录路径
+            process_id: 进程ID，用于PID隔离
         """
         self.api_provider = api_provider
+        self.base_terms_dir = Path(base_terms_dir) if base_terms_dir else None
+        self.process_id = process_id
         self.term_entries: List[TermDisambiguator.TermEntry] = []
         self.term_entry_map: Dict[str, TermDisambiguator.TermEntry] = {}
+    # =========================================================
+    # 新增的私有路径生成方法（保持缩进）
+    # =========================================================
+    def _get_entity_json_path(self) -> Path:
+        """获取实体术语库路径"""
+        if self.base_terms_dir:
+            entity_dir = self.base_terms_dir / "Entity"
+            entity_dir.mkdir(parents=True, exist_ok=True)
+            if self.process_id:
+                return entity_dir / f"Entity_{self.process_id}.json"
+            return entity_dir / "Entity.json"
+        return Path(r"E:\KKGG\output\terms\Entity.json")
     
+    def _get_relation_json_path(self) -> Path:
+        """获取关系术语库路径"""
+        if self.base_terms_dir:
+            relation_dir = self.base_terms_dir / "Relation"
+            relation_dir.mkdir(parents=True, exist_ok=True)
+            if self.process_id:
+                return relation_dir / f"Relation_{self.process_id}.json"
+            return relation_dir / "Relation.json"
+        return Path(r"E:\KKGG\output\terms\Relation.json")
+    
+    def _get_cluster_json_path(self) -> Path:
+        """获取聚类三元组库路径（存于entity_cluster_triples目录）"""
+        if self.base_terms_dir:
+            cluster_dir = self.base_terms_dir / "entity_cluster_triples"
+            cluster_dir.mkdir(parents=True, exist_ok=True)
+            if self.process_id:
+                return cluster_dir / f"entity_cluster_triples_{self.process_id}.json"
+            return cluster_dir / "entity_cluster_triples.json"
+        return Path(r"E:\KKGG\output\terms\entity_cluster_triples\entity_cluster_triples.json")       
+    def _get_concept_entity_json_path(self) -> Path:
+        """概念聚类专用：获取概念实体术语库路径（存于definitions目录）"""
+        if self.base_terms_dir:
+            concept_dir = self.base_terms_dir / "definitions"
+            concept_dir.mkdir(parents=True, exist_ok=True)
+            if self.process_id:
+                return concept_dir / f"Entity_{self.process_id}.json"
+            return concept_dir / "Entity.json"
+        return Path(r"E:\KKGG\output\terms\definitions\Entity.json")
     # =========================================================
     # 辅助方法：余弦相似度
     # =========================================================
+
     @staticmethod
     def _cos(a: list, b: list) -> float:
         """计算两个向量的余弦相似度"""
@@ -827,22 +888,24 @@ class TermDisambiguator:
         Returns:
             Dict[术语, 三元组列表]
         """
-        print("\n" + "=" * 60)
-        print("Clusterer 函数 - 概念聚类")
-        print("=" * 60)
+        # 关键修改：使用概念实体专用路径
+        entity_json_path = self._get_concept_entity_json_path()  # ← 改为新方法
+        cluster_json_path = self._get_cluster_json_path()
         
-        # 固定参数
-        entity_json_path = r"E:\KKGG\output\terms\Entity.json"
-        cluster_json_path = r"E:\KKGG\output\terms\entity_cluster_triples.json"
+        print(f"\n" + "=" * 60)
+        print(f"Clusterer 函数 - 概念聚类")
+        print(f"概念实体路径: {entity_json_path}")
+        print(f"聚类输出路径: {cluster_json_path}")
+        print("=" * 60)
         
         # 保存处理前的数据
         old_json_data, _ = self._load_json_terms(entity_json_path)
         
         # 1. 处理实体数组
         print("\n" + "-" * 60)
-        print("处理实体术语")
+        print("处理概念实体")
         print("-" * 60)
-        print(f"实体JSON路径: {entity_json_path}")
+        print(f"概念实体路径: {entity_json_path}")
         print(f"输入实体数: {len(terms)}")
         
         result = self.process_terms_pipeline(
@@ -870,8 +933,6 @@ class TermDisambiguator:
         print("=" * 60)
         
         return result
-    
-    # =========================================================
     # Disambiguate 函数：处理实体和关系数组
     # =========================================================
     def Disambiguate(
@@ -887,20 +948,21 @@ class TermDisambiguator:
         Args:
             entity_terms: 实体术语数组
             relation_terms: 关系术语数组
-            entity_shared_context: 实体的共享上下文（可选，包含所有实体术语）
-            relation_shared_context: 关系的共享上下文（可选，包含所有关系术语）
+            entity_shared_context: 实体的共享上下文（可选）
+            relation_shared_context: 关系的共享上下文（可选）
         
         Returns:
             (更新后的实体数组, 更新后的关系数组)
-            - 如果术语作为同义词出现，则替换为主术语
         """
-        print("\n" + "=" * 60)
-        print("Disambiguate 函数 - 实体与关系消歧")
-        print("=" * 60)
+        # 使用辅助方法生成路径（仅这两行修改）
+        entity_json_path = self._get_entity_json_path()
+        relation_json_path = self._get_relation_json_path()
         
-        # 固定参数
-        entity_json_path = r"E:\KKGG\output\terms\Entity.json"
-        relation_json_path = r"E:\KKGG\output\terms\Relation.json"
+        print(f"\n" + "=" * 60)
+        print(f"Disambiguate 函数 - 实体与关系消歧")
+        print(f"实体JSON路径: {entity_json_path}")
+        print(f"关系JSON路径: {relation_json_path}")
+        print("=" * 60)
         
         # =========================================================
         # 1. 处理实体数组
@@ -991,8 +1053,6 @@ class TermDisambiguator:
         print(f"  替换数量: {relation_replacements}")
         
         return updated_entity_terms, updated_relation_terms
-
-
 # =========================================================
 # 测试主函数（可选）
 # =========================================================
