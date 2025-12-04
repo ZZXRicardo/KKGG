@@ -136,6 +136,11 @@ class MainCLI(CLI):
                                 help='术语库基础目录路径（默认可用）')
         self.parser.add_argument('--no_pid', action='store_true',
                                 help='禁用PID命名，使用默认文件名')    
+        
+        # 新增：日志目录参数
+        self.parser.add_argument('--log_dir', type=str, default='./logs',
+                                help='日志输出目录（默认: ./logs）')
+        
     def run(self, args):
         """
         执行选定的任务
