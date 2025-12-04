@@ -6,14 +6,16 @@
 包括：实体提取、关系提取、实体消歧、局部概念聚类
 支持按文章逐个处理、增量输出和断点续处理
 """
-
 import argparse
 import logging
 import os
 import json
 import re
+import sys
+import datetime
 from pathlib import Path
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set, Tuple, Optional
+
 from cli import CLI
 from entity_extraction.extractor import EntityExtractor
 from relation_extraction.extractor import RelationExtractor
@@ -141,6 +143,27 @@ class MainCLI(CLI):
         self.parser.add_argument('--log_dir', type=str, default='./logs',
                                 help='日志输出目录（默认: ./logs）')
         
+    def _setup_logging(self, args):
+        """初始化日志系统：同时输出到控制台和按任务+时间命名的日志文件"""
+        # 创建日志目录
+        log_dir = Path(args.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+    
+        # 生成带时间戳的日志文件名
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = log_dir / f"{args.task}_{timestamp}.log"
+    
+        # 配置 logging（使用 force=True 确保重复调用时不会叠加 handler，Python 3.8+）
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file, encoding='utf-8'),
+                logging.StreamHandler()
+            ],
+            force=True  # ← 关键：避免多次运行时日志重复
+        )
+
     def run(self, args):
         """
         执行选定的任务
@@ -148,29 +171,41 @@ class MainCLI(CLI):
         Args:
             args: 解析后的命令行参数
         """
+        # 初始化日志系统（必须在任何 logging 调用前完成）
+        self._setup_logging(args)
+    
         logging.info(f"开始执行任务: {args.task}")
+    
+        try:
+            if args.task == 'all':
+                self._run_entity_extraction(args)
+                self._run_relation_extraction(args)
+                self._run_entity_evaluation(args)
+                self._run_relation_evaluation(args)
+                self._run_entity_disambiguation(args)
+                self._run_concept_clustering(args)
+            elif args.task == 'entity_extraction':
+                self._run_entity_extraction(args)
+            elif args.task == 'relation_extraction':
+                self._run_relation_extraction(args)
+            elif args.task == 'entity_evaluation':
+                self._run_entity_evaluation(args)
+            elif args.task == 'relation_evaluation':
+                self._run_relation_evaluation(args)
+            elif args.task == 'entity_disambiguation':
+                self._run_entity_disambiguation(args)
+            elif args.task == 'concept_clustering':
+                self._run_concept_clustering(args)
+            else:
+                # 理论上 argparse 已限制 choices，此分支不会触发，但保留防御性编程
+                logging.error(f"未知任务: {args.task}")
+                raise ValueError(f"Unknown task: {args.task}")
+            
+            logging.info(f"任务 '{args.task}' 执行完成 ✅")
         
-        if args.task == 'all':
-            self._run_entity_extraction(args)
-            self._run_relation_extraction(args)
-            self._run_entity_evaluation(args)
-            self._run_relation_evaluation(args)
-            self._run_entity_disambiguation(args)
-            self._run_concept_clustering(args)
-        elif args.task == 'entity_extraction':
-            self._run_entity_extraction(args)
-        elif args.task == 'relation_extraction':
-            self._run_relation_extraction(args)
-        elif args.task == 'entity_evaluation':
-            self._run_entity_evaluation(args)
-        elif args.task == 'relation_evaluation':
-            self._run_relation_evaluation(args)
-        elif args.task == 'entity_disambiguation':
-            self._run_entity_disambiguation(args)
-        elif args.task == 'concept_clustering':
-            self._run_concept_clustering(args)
-        
-        logging.info(f"任务 {args.task} 执行完成")
+        except Exception as e:
+            logging.exception(f"任务 '{args.task}' 执行过程中发生未预期错误 ❌")
+            raise  # 可选择是否 re-raise，便于上层捕获或退出
     
     def _extract_file_index(self, filename):
         """
