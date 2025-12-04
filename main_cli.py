@@ -42,6 +42,8 @@ class MainCLI(CLI):
                                 help='实体提取的输入目录）')
         self.parser.add_argument('--entity_output_dir', type=str, required=False,
                                 help='实体提取的输出目录')
+        self.parser.add_argument('--entity_error_dir', type=str, default=None,
+                                 help='实体提取失败条目保存目录（默认: entity_output_dir/errors）')
         self.parser.add_argument('--entity_prompt', type=str, required=False,
                                 help='实体提取的 Prompt 模板路径')
         self.parser.add_argument('--entity_threshold', type=float, default=0.5,
@@ -54,6 +56,8 @@ class MainCLI(CLI):
                                 help='关系提取的输入目录')
         self.parser.add_argument('--relation_output_dir', type=str, required=False,
                                 help='关系提取的输出目录')
+        self.parser.add_argument('--relation_error_dir', type=str, default=None,
+                                 help='关系提取失败条目保存目录（默认: relation_output_dir/errors）')
         self.parser.add_argument('--relation_prompt', type=str, required=False,
                                 help='关系提取的 Prompt 模板路径')
         self.parser.add_argument('--relation_threshold', type=float, default=0.5,
@@ -204,10 +208,14 @@ class MainCLI(CLI):
         return [file_path for _, file_path in files_with_index]
     
     def _run_entity_extraction(self, args):
-        logging.info("开始实体提取任务")
+        logging.info("开始实体提取任务（.json 输入 → .jsonl 输出，条目级容错）")
+
+        if not args.entity_input_dir or not args.entity_output_dir:
+            raise ValueError("--entity_input_dir 和 --entity_output_dir 必须指定")
 
         input_dir = Path(args.entity_input_dir)
         output_dir = Path(args.entity_output_dir)
+        error_dir = Path(args.entity_error_dir) if args.entity_error_dir else output_dir / "errors"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         extractor = EntityExtractor(
@@ -215,9 +223,12 @@ class MainCLI(CLI):
             threshold=args.entity_threshold
         )
 
-        # 保持原有的文件处理方式，不修改
-        input_files = sorted(input_dir.glob("*.json"))
-        total_articles = 0
+        input_files = self._get_sorted_files(input_dir)
+        if not input_files:
+            logging.warning(f"实体输入目录中无 .json 文件: {input_dir}")
+            return
+
+        total_processed = total_success = total_failure = 0
 
         for idx, input_file in enumerate(input_files):
             if idx < args.start_index:
@@ -225,27 +236,66 @@ class MainCLI(CLI):
             if args.end_index >= 0 and idx > args.end_index:
                 break
 
-            output_file = output_dir / (input_file.stem + ".jsonl") + output_dir / (input_file.stem + ".json")
+            output_file = output_dir / (input_file.stem + ".jsonl")
+            error_file = error_dir / (input_file.stem + ".errors.jsonl")
 
             if args.resume and output_file.exists():
                 logging.info(f"跳过（已存在）: {output_file.name}")
                 continue
 
-            logging.info(f"处理: {input_file.name} -> {output_file.name}")
-            result = extractor.extract(
-                input_file=input_file,
-                output_file=output_file,
-                prompt_path=args.entity_prompt
-            )
-            total_articles += result.get("processed", 0)
+            logging.info(f"处理实体文件: {input_file.name}")
 
-        logging.info(f"实体提取完成，共处理 {total_articles} 篇文章")
+            try:
+                with open(input_file, 'r', encoding='utf-8') as f:
+                    records = json.load(f)
+                if not isinstance(records, list):
+                    raise ValueError("JSON 文件根元素必须是数组")
+            except Exception as e:
+                logging.error(f"加载失败 {input_file}: {e}")
+                continue
+
+            success_count = failure_count = 0
+            error_buffer = []
+
+            with open(output_file, 'w', encoding='utf-8') as out_f:
+                for record_idx, record in enumerate(records):
+                    try:
+                        result = extractor.extract_single(record, prompt_path=args.entity_prompt)
+                        out_f.write(json.dumps(result, ensure_ascii=False) + '\n')
+                        success_count += 1
+                    except Exception as e:
+                        failure_count += 1
+                        error_buffer.append({
+                            "source_file": str(input_file),
+                            "record_index": record_idx,
+                            "record": record,
+                            "error": str(e)
+                        })
+
+            total_processed += len(records)
+            total_success += success_count
+            total_failure += failure_count
+
+            if error_buffer:
+                error_dir.mkdir(parents=True, exist_ok=True)
+                with open(error_file, 'w', encoding='utf-8') as err_f:
+                    for err in error_buffer:
+                        err_f.write(json.dumps(err, ensure_ascii=False) + '\n')
+                logging.warning(f"  → {failure_count} 条失败，错误日志: {error_file}")
+            else:
+                logging.info(f"  → 全部 {success_count} 条成功")
+
+        logging.info(f"实体提取完成：共 {total_processed} 条，成功 {total_success}，失败 {total_failure}")
 
     def _run_relation_extraction(self, args):
-        logging.info("开始关系提取任务")
+        logging.info("开始关系提取任务（.jsonl 输入/输出，条目级容错）")
+
+        if not args.relation_input_dir or not args.relation_output_dir:
+            raise ValueError("--relation_input_dir 和 --relation_output_dir 必须指定")
 
         input_dir = Path(args.relation_input_dir)
         output_dir = Path(args.relation_output_dir)
+        error_dir = Path(args.relation_error_dir) if args.relation_error_dir else output_dir / "errors"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         extractor = RelationExtractor(
@@ -253,9 +303,12 @@ class MainCLI(CLI):
             threshold=args.relation_threshold
         )
 
-        # 保持原有的文件处理方式，不修改
-        input_files = sorted(input_dir.glob("*.jsonl")) + sorted(input_dir.glob("*.json"))
-        total_articles = 0
+        input_files = self._get_sorted_files(input_dir)
+        if not input_files:
+            logging.warning(f"关系输入目录中无 .jsonl 文件: {input_dir}")
+            return
+
+        total_processed = total_success = total_failure = 0
 
         for idx, input_file in enumerate(input_files):
             if idx < args.start_index:
@@ -263,21 +316,57 @@ class MainCLI(CLI):
             if args.end_index >= 0 and idx > args.end_index:
                 break
 
-            output_file = output_dir / (input_file.stem + ".json")
+            output_file = output_dir / (input_file.stem + ".jsonl")
+            error_file = error_dir / (input_file.stem + ".errors.jsonl")
 
             if args.resume and output_file.exists():
                 logging.info(f"跳过（已存在）: {output_file.name}")
                 continue
 
-            logging.info(f"处理: {input_file.name} -> {output_file.name}")
-            result = extractor.extract(
-                input_file=input_file,
-                output_file=output_file,
-                prompt_path=args.relation_prompt
-            )
-            total_articles += result.get("successful_records", 0)
+            logging.info(f"处理关系文件: {input_file.name}")
 
-        logging.info(f"关系提取完成，共处理 {total_articles} 篇文章")
+            records = []
+            with open(input_file, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if line:
+                        try:
+                            records.append(json.loads(line))
+                        except Exception as e:
+                            logging.warning(f"跳过无效 JSON 行 {line_num} in {input_file}: {e}")
+
+            success_count = failure_count = 0
+            error_buffer = []
+
+            with open(output_file, 'w', encoding='utf-8') as out_f:
+                for record_idx, record in enumerate(records):
+                    try:
+                        result = extractor.extract_single(record, prompt_path=args.relation_prompt)
+                        out_f.write(json.dumps(result, ensure_ascii=False) + '\n')
+                        success_count += 1
+                    except Exception as e:
+                        failure_count += 1
+                        error_buffer.append({
+                            "source_file": str(input_file),
+                            "record_index": record_idx,
+                            "record": record,
+                            "error": str(e)
+                        })
+
+            total_processed += len(records)
+            total_success += success_count
+            total_failure += failure_count
+
+            if error_buffer:
+                error_dir.mkdir(parents=True, exist_ok=True)
+                with open(error_file, 'w', encoding='utf-8') as err_f:
+                    for err in error_buffer:
+                        err_f.write(json.dumps(err, ensure_ascii=False) + '\n')
+                logging.warning(f"  → {failure_count} 条失败，错误日志: {error_file}")
+            else:
+                logging.info(f"  → 全部 {success_count} 条成功")
+
+        logging.info(f"关系提取完成：共 {total_processed} 条，成功 {total_success}，失败 {total_failure}")
     
     def _run_entity_evaluation(self, args):
         logging.info("開始實體評估任務（多輪迭代自我修正）")
