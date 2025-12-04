@@ -20,7 +20,7 @@ class EntityExtractor:
 
         Args:
             model_name (str): 使用的模型名称（如 'qwen', 'deepseek'）
-            threshold (float): 实体识别的置信度阈值
+            threshold (float): 实体识别的置信度阈值（当前未使用，保留扩展性）
         """
         self.model_name = model_name
         self.threshold = threshold
@@ -60,6 +60,7 @@ class EntityExtractor:
         with open(prompt_path, 'r', encoding='utf-8') as f:
             system_prompt = f.read().strip()
 
+        # 加载输入 JSON 数组
         try:
             with open(input_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -78,34 +79,9 @@ class EntityExtractor:
                 if not isinstance(record, dict):
                     self.logger.warning(f"跳过非字典项（索引 {idx}）")
                     continue
-            
-                # 兼容 name / title，并确保有值
-                name = record.get("name") or record.get("title") or f"unnamed_{idx}"
-            
-                content = record.get("content", "")
-                if not content or (isinstance(content, str) and not content.strip()):
-                    self.logger.warning(f"记录 {name} 内容为空，跳过")
-                    continue
-            
-                # 标准化 content：过滤空值和 "---"
-                if isinstance(content, list):
-                    content_str = " ".join(
-                        str(x) for x in content 
-                        if x is not None and str(x).strip() and str(x).strip() != "---"
-                    )
-                else:
-                    content_str = str(content).strip()
-            
-                if not content_str:
-                    self.logger.warning(f"记录 {name} 标准化后内容为空，跳过")
-                    continue
-            
-                full_input = {
-                    "name": name,
-                    "content": content_str
-                }
-            
-                user_input = json.dumps(full_input, ensure_ascii=False, indent=2)
+
+                # 直接使用原始 record 作为输入
+                user_input = json.dumps(record, ensure_ascii=False, indent=2)
                 full_prompt = f"{system_prompt}\n\n---\n\n{user_input}"
 
                 try:
@@ -117,13 +93,14 @@ class EntityExtractor:
                         result_obj = json.loads(extracted_text)
                         entities = result_obj.get("results", [])
                     except json.JSONDecodeError:
-                        self.logger.warning(f"LLM 返回非 JSON 格式，记录: {name}")
+                        self.logger.warning(f"LLM 返回非 JSON 格式，记录索引: {idx}")
                         entities = []
 
                 except Exception as e:
-                    self.logger.error(f"处理 {name} 时出错: {e}", exc_info=True)
+                    self.logger.error(f"处理记录索引 {idx} 时出错: {e}", exc_info=True)
                     entities = []
 
+                # 保留原始字段，仅更新 results
                 final_record = record.copy()
                 final_record["results"] = entities
                 out_f.write(json.dumps(final_record, ensure_ascii=False) + '\n')
@@ -138,19 +115,18 @@ class EntityExtractor:
 
     def load_model(self):
         """
-        加载实体提取模型
+        加载实体提取模型（预留接口）
         
         Returns:
             object: 加载的模型对象
         """
         self.logger.info(f"加载实体提取模型: {self.model_name}")
-        # 模型加载逻辑将在这里实现
-        # ...
+        # 模型加载逻辑将在这里实现（若未来支持本地模型）
         return None
     
     def preprocess(self, text):
         """
-        预处理输入文本
+        预处理输入文本（预留接口）
         
         Args:
             text (str): 输入文本
@@ -158,13 +134,11 @@ class EntityExtractor:
         Returns:
             object: 预处理后的文本
         """
-        # 文本预处理逻辑将在这里实现
-        # ...
         return text
     
     def postprocess(self, predictions):
         """
-        后处理模型预测结果
+        后处理模型预测结果（预留接口）
         
         Args:
             predictions (object): 模型预测结果
@@ -172,6 +146,4 @@ class EntityExtractor:
         Returns:
             list: 后处理后的实体列表
         """
-        # 预测结果后处理逻辑将在这里实现
-        # ...
         return []
