@@ -18,7 +18,7 @@ from cli import CLI
 from entity_extraction.extractor import EntityExtractor
 from relation_extraction.extractor import RelationExtractor
 from disambiguator_clusterer import TermDisambiguator
-
+from Quality_evaluation.extractor import EvaluationExtractor
 
 
 class MainCLI(CLI):
@@ -31,6 +31,7 @@ class MainCLI(CLI):
         # 添加任务选择参数
         self.parser.add_argument('--task', type=str, required=True,
                                 choices=['entity_extraction', 'relation_extraction', 
+                                         'entity_evaluation', 'relation_evaluation',
                                          'entity_disambiguation', 'concept_clustering', 'all'],
                                 help='要执行的任务')
         
@@ -58,6 +59,40 @@ class MainCLI(CLI):
         self.parser.add_argument('--relation_threshold', type=float, default=0.5,
                                 help='关系提取的置信度阈值')
         
+        # === 實體評估新增參數 ===
+        self.parser.add_argument('--entity_eval_model1', type=str, default='default',
+                                help='實體評估奇數輪使用的模型')
+        self.parser.add_argument('--entity_eval_model2', type=str, default='default',
+                                help='實體評估偶數輪使用的模型')
+        self.parser.add_argument('--entity_eval_prompt', type=str, default='prompt/evaluation_entities',
+                                help='實體評估 Prompt 路徑')
+        self.parser.add_argument('--entity_eval_input_dir', type=str, required=False,
+                                help='實體評估輸入目錄（待評估的實體提取結果）')
+        self.parser.add_argument('--entity_eval_output_dir', type=str, required=False,
+                                help='實體評估輸出目錄')
+        self.parser.add_argument('--entity_max_iterations', type=int, default=5,
+                                help='實體最大迭代修正次數')
+
+        # === 關係評估新增參數 ===
+        self.parser.add_argument('--relation_eval_model1', type=str, default='default',
+                                help='關係評估奇數輪使用的模型')
+        self.parser.add_argument('--relation_eval_model2', type=str, default='default',
+                                help='關係評估偶數輪使用的模型')
+        self.parser.add_argument('--relation_eval_prompt', type=str, default='prompt/evaluation_relations',
+                                help='關係評估 Prompt 路徑')
+        self.parser.add_argument('--relation_eval_input_dir', type=str, required=False,
+                                help='關係評估輸入目錄（待評估的關係提取結果）')
+        self.parser.add_argument('--relation_eval_output_dir', type=str, required=False,
+                                help='關係評估輸出目錄')
+        self.parser.add_argument('--relation_max_iterations', type=int, default=5,
+                                help='關係最大迭代修正次數')
+        
+        # === 評估過程記錄目錄 ===
+        self.parser.add_argument('--record_dir', type=str, default="Output/record",
+                                help='評估過程詳細記錄目錄（包含每輪LLM輸出、修正過程），默認: Output/record')
+        self.parser.add_argument('--no_record', action='store_true',
+                                help='完全禁用過程記錄（節省磁碟空間，僅保留最終結果）')
+
         # 实体消歧相关参数
         self.parser.add_argument('--disambiguation_method', type=str, default='default',
                                 help='实体消歧使用的方法')
@@ -109,12 +144,18 @@ class MainCLI(CLI):
         if args.task == 'all':
             self._run_entity_extraction(args)
             self._run_relation_extraction(args)
+            self._run_entity_evaluation(args)
+            self._run_relation_evaluation(args)
             self._run_entity_disambiguation(args)
             self._run_concept_clustering(args)
         elif args.task == 'entity_extraction':
             self._run_entity_extraction(args)
         elif args.task == 'relation_extraction':
             self._run_relation_extraction(args)
+        elif args.task == 'entity_evaluation':
+            self._run_entity_evaluation(args)
+        elif args.task == 'relation_evaluation':
+            self._run_relation_evaluation(args)
         elif args.task == 'entity_disambiguation':
             self._run_entity_disambiguation(args)
         elif args.task == 'concept_clustering':
@@ -148,7 +189,7 @@ class MainCLI(CLI):
         Returns:
             list: 按索引排序的文件路径列表
         """
-        input_files = list(input_dir.glob("*.json"))
+        input_files = sorted(input_dir.glob("*.json")) + sorted(input_dir.glob("*.jsonl"))
         
         # 提取文件索引并排序
         files_with_index = []
@@ -184,7 +225,7 @@ class MainCLI(CLI):
             if args.end_index >= 0 and idx > args.end_index:
                 break
 
-            output_file = output_dir / (input_file.stem + ".jsonl")
+            output_file = output_dir / (input_file.stem + ".jsonl") + output_dir / (input_file.stem + ".json")
 
             if args.resume and output_file.exists():
                 logging.info(f"跳过（已存在）: {output_file.name}")
@@ -213,7 +254,7 @@ class MainCLI(CLI):
         )
 
         # 保持原有的文件处理方式，不修改
-        input_files = sorted(input_dir.glob("*.jsonl"))
+        input_files = sorted(input_dir.glob("*.jsonl")) + sorted(input_dir.glob("*.json"))
         total_articles = 0
 
         for idx, input_file in enumerate(input_files):
@@ -222,7 +263,7 @@ class MainCLI(CLI):
             if args.end_index >= 0 and idx > args.end_index:
                 break
 
-            output_file = output_dir / (input_file.stem + ".jsonl")
+            output_file = output_dir / (input_file.stem + ".json")
 
             if args.resume and output_file.exists():
                 logging.info(f"跳过（已存在）: {output_file.name}")
@@ -238,6 +279,120 @@ class MainCLI(CLI):
 
         logging.info(f"关系提取完成，共处理 {total_articles} 篇文章")
     
+    def _run_entity_evaluation(self, args):
+        logging.info("開始實體評估任務（多輪迭代自我修正）")
+        
+        input_dir = Path(args.entity_eval_input_dir or args.entity_output_dir)
+        output_dir = Path(args.entity_eval_output_dir or "output/entities_evaluated")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not input_dir.exists():
+            logging.error(f"輸入目錄不存在: {input_dir}")
+            return
+        
+        record_base = None if args.no_record else args.record_dir
+        
+        evaluator = EvaluationExtractor(
+            eval_model1=args.entity_eval_model1,
+            eval_model2=args.entity_eval_model2,
+            eval_prompt_path=args.entity_eval_prompt,
+            max_iterations=args.entity_max_iterations,
+            record_base_dir=record_base
+        )
+        
+        # 直接使用你已有的排序方法
+        input_files = self._get_sorted_files(input_dir)
+        if not input_files:
+            logging.warning(f"輸入目錄中無 JSON 文件: {input_dir}")
+            return
+        
+        logging.info(f"發現 {len(input_files)} 個待評估文件")
+        
+        for idx, input_file in enumerate(input_files):
+            output_file = output_dir / input_file.name
+            
+            # 簡單判斷：輸出文件已存在 = 跳過（你不需要斷點續傳）
+            if output_file.exists():
+                logging.info(f"跳過（已存在）: {output_file.name}")
+                continue
+                
+            logging.info(f"\n{'='*80}")
+            logging.info(f"[{idx+1}/{len(input_files)}] 正在評估實體: {input_file.name}")
+            logging.info(f"{'='*80}")
+            
+            try:
+                result = evaluator.evaluate_and_correct(
+                    input_file=input_file,
+                    output_file=output_file,
+                    record_dir=Path(args.record_dir) / input_file.stem if not args.no_record else None,          # 這裡是你想要的 record 根目錄
+                    task_type="entity",                         # 或 "relation"
+                    chunk_id=input_file.stem
+                )
+                logging.info(f"實體評估完成 → {output_file.name} （共 {result['total_iterations']} 輪）")
+                
+            except Exception as e:
+                logging.error(f"實體評估失敗 {input_file.name}: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+        
+        logging.info("實體評估任務全部完成！")
+
+    def _run_relation_evaluation(self, args):
+        logging.info("開始關係評估任務（多輪迭代自我修正 + 保留最終實體）")
+        
+        input_dir = Path(args.relation_eval_input_dir or args.relation_output_dir)
+        output_dir = Path(args.relation_eval_output_dir or "output/relations_evaluated")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not input_dir.exists():
+            logging.error(f"輸入目錄不存在: {input_dir}")
+            return
+            
+        record_base = None if args.no_record else args.record_dir
+        
+        evaluator = EvaluationExtractor(
+            eval_model1=args.relation_eval_model1,
+            eval_model2=args.relation_eval_model2,
+            eval_prompt_path=args.relation_eval_prompt,
+            max_iterations=args.relation_max_iterations,
+            record_base_dir=record_base
+        )
+        
+        input_files = self._get_sorted_files(input_dir)
+        if not input_files:
+            logging.warning(f"輸入目錄中無 JSON 文件: {input_dir}")
+            return
+        
+        logging.info(f"發現 {len(input_files)} 個待評估文件")
+        
+        for idx, input_file in enumerate(input_files):
+            output_file = output_dir / input_file.name
+            
+            if output_file.exists():
+                logging.info(f"跳過（已存在）: {output_file.name}")
+                continue
+                
+            logging.info(f"\n{'='*80}")
+            logging.info(f"[{idx+1}/{len(input_files)}] 正在評估關係: {input_file.name}")
+            logging.info(f"{'='*80}")
+            
+            try:
+                result = evaluator.evaluate_and_correct(
+                    input_file=input_file,
+                    output_file=output_file,
+                    record_dir=Path(args.record_dir) / input_file.stem if not args.no_record else None,
+                    task_type="relation",                         # 或 "relation"
+                    chunk_id=input_file.stem
+                )
+                logging.info(f"關係評估完成 → {output_file.name} （共 {result['total_iterations']} 輪）")
+                
+            except Exception as e:
+                logging.error(f"關係評估失敗 {input_file.name}: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+        
+        logging.info("關係評估任務全部完成！")
+
     def _ensure_progress_file_exists(self, progress_file: str):
         """确保进度文件存在且格式正确"""
         progress_dir = os.path.dirname(progress_file)
